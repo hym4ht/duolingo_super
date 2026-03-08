@@ -1,0 +1,8 @@
+node_modules/
+.profiles/
+debug/
+*.py
+accounts.json
+config.json
+sign-in-account.json
+vcc.json

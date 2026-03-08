@@ -1,0 +1,1635 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Duolingo Ops Board</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --surface: #ffffff;
+      --ink: #0f172a;
+      --ink-soft: #64748b;
+      --line: #e2e8f0;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: #eff6ff;
+      --danger: #ef4444;
+      --danger-light: #fef2f2;
+      --success: #10b981;
+      --success-light: #ecfdf5;
+      --warning: #f59e0b;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: ui-monospace, 'Cascadia Code', SFMono-Regular, monospace;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--ink);
+      background: var(--bg);
+      padding: 16px;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    /* ── Header ── */
+    .hero {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .hero>div:first-child {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--primary);
+      background: var(--primary-light);
+      padding: 3px 8px;
+      border-radius: 99px;
+      margin-bottom: 8px;
+    }
+
+    .hero h1 {
+      font-size: 1.5rem;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .hero>div:first-child>p {
+      margin-bottom: 16px;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .stat-card {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      min-width: 100px;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--ink-soft);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .hero-side {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex-shrink: 0;
+      min-width: 200px;
+    }
+
+    .hero-note {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hero-note strong {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-soft);
+    }
+
+    .hero-note code {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--ink);
+      background: var(--line);
+      padding: 1px 5px;
+      border-radius: 4px;
+      width: fit-content;
+    }
+
+    .hero-note .muted {
+      font-size: 0.78rem;
+    }
+
+    /* ── Layout ── */
+    .layout,
+    .layout.bottom {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    @media (max-width: 820px) {
+
+      .layout,
+      .layout.bottom {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        flex-direction: column;
+      }
+
+      .hero-side {
+        min-width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .hero-note {
+        flex: 1;
+        min-width: 150px;
+      }
+    }
+
+    /* ── Panel ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .panel-kicker {
+      display: none;
+    }
+
+    .panel-title {
+      font-size: 1rem;
+      color: var(--ink);
+    }
+
+    .panel-description {
+      margin-bottom: 18px;
+      font-size: 0.82rem;
+    }
+
+    /* ── Form ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 540px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .field,
+    .field.full {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    input,
+    select,
+    textarea {
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 0.85rem;
+      color: var(--ink);
+      background: var(--surface);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--ink-soft);
+      opacity: 0.7;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 7px 14px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-weight: 500;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.12s, opacity 0.12s;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-secondary {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--ink-soft);
+    }
+
+    .btn-ghost:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .btn-warm {
+      background: var(--warning);
+      color: white;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* ── Status strip ── */
+    .status-strip {
+      margin-top: 16px;
+      padding: 10px 14px;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid var(--line);
+      gap: 8px;
+    }
+
+    .status-pill {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 99px;
+      background: var(--line);
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .status-pill.error {
+      background: var(--danger);
+      color: white;
+    }
+
+    .helper {
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+      margin-top: 2px;
+    }
+
+    /* ── Log box ── */
+    .log-box {
+      background: #0d1117;
+      color: #c9d1d9;
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      height: 390px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #21262d;
+    }
+
+    .log-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .mono-chip {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 4px;
+      color: #8b949e;
+    }
+
+    .log-output {
+      flex: 1;
+      overflow-y: auto;
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+
+    .log-output::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .log-output::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 99px;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 380px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      margin-top: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 600px;
+      text-align: left;
+    }
+
+    th,
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    th {
+      background: var(--bg);
+      font-weight: 600;
+      color: var(--ink-soft);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      box-shadow: 0 1px 0 var(--line);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr:hover td {
+      background: #fafbfc;
+    }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 99px;
+      background: var(--line);
+      color: var(--ink-soft);
+    }
+
+    .badge.success {
+      background: var(--success-light);
+      color: #065f46;
+    }
+
+    .badge.failed,
+    .badge.error {
+      background: var(--danger-light);
+      color: #991b1b;
+    }
+
+    /* ── Row actions ── */
+    .row-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .mini-btn {
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 500;
+      transition: background 0.1s;
+    }
+
+    .mini-btn:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    /* ── Misc ── */
+    .muted {
+      color: var(--ink-soft);
+    }
+
+    .empty {
+      padding: 28px 20px;
+      text-align: center;
+      color: var(--ink-soft);
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--line);
+      margin-top: 14px;
+      font-size: 0.85rem;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    details {
+      margin-top: 14px;
+      padding: 12px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+    }
+
+    summary {
+      font-weight: 500;
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      user-select: none;
+    }
+
+    summary:hover {
+      color: var(--ink);
+    }
+
+    details .form-grid {
+      margin-top: 12px;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+
+      .panel {
+        padding: 16px;
+      }
+
+      .hero {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <span class="eyebrow">Web Control Deck</span>
+        <h1>Duolingo Ops Board</h1>
+        <p>Versi website dari menu terminal untuk login satu akun, batch terbaru, kelola akun, kelola VCC, dan bersihin
+          sesi login tersimpan.</p>
+        <div class="stats" id="statsGrid"></div>
+      </div>
+      <div class="hero-side">
+        <div class="hero-note">
+          <strong>Active Files</strong>
+          <code>sign-in-account.json</code>
+          <code>vcc.json</code>
+        </div>
+        <div class="hero-note">
+          <strong>Run Flow</strong>
+          <div class="muted">Pilih mode, tentukan akun atau jumlah batch, lalu stream log proses langsung di panel
+            kanan.</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">Runner</span>
+            <h2 class="panel-title">Login Console</h2>
+          </div>
+          <div class="panel-actions">
+            <button class="btn-ghost" id="refreshDataBtn" type="button">Refresh Data</button>
+          </div>
+        </div>
+        <p class="panel-description">Mode single dan batch versi website. Claim trial otomatis akan mengambil kartu dari
+          <code>vcc.json</code>.
+        </p>
+
+        <form id="runnerForm">
+          <div class="form-grid">
+            <div class="field">
+              <label for="runMode">Mode</label>
+              <select id="runMode">
+                <option value="single">Login 1 akun</option>
+                <option value="batch">Login batch terbaru</option>
+              </select>
+            </div>
+            <div class="field" id="singleAccountField">
+              <label for="singleAccountSelect">Akun</label>
+              <select id="singleAccountSelect"></select>
+            </div>
+            <div class="field hidden" id="batchCountField">
+              <label for="batchCountInput">Jumlah akun batch</label>
+              <input id="batchCountInput" type="number" min="1" value="1" />
+            </div>
+            <div class="field" id="passwordModeField">
+              <label for="passwordModeSelect">Mode password</label>
+              <select id="passwordModeSelect">
+                <option value="auto">Otomatis</option>
+                <option value="manual">Manual di browser</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="afterLoginSelect">After login</label>
+              <select id="afterLoginSelect">
+                <option value="none">Tidak ada</option>
+                <option value="trial-auto-vcc">Claim trial + isi pembayaran</option>
+              </select>
+            </div>
+            <div class="field hidden" id="vccSelectField">
+              <label for="vccSelect">VCC</label>
+              <select id="vccSelect"></select>
+            </div>
+            <div class="field">
+              <label for="submitWaitInput">Submit wait (detik)</label>
+              <input id="submitWaitInput" type="number" min="0" max="300" />
+            </div>
+            <div class="field">
+              <label for="retryInput">Retry login</label>
+              <input id="retryInput" type="number" min="1" max="20" />
+            </div>
+          </div>
+
+          <details>
+            <summary>Advanced Runtime</summary>
+            <div class="form-grid">
+              <div class="field">
+                <label for="headlessToggle">Headless</label>
+                <select id="headlessToggle">
+                  <option value="true">true</option>
+                  <option value="false">false</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="slowMoInput">Slow mo (ms)</label>
+                <input id="slowMoInput" type="number" min="0" />
+              </div>
+              <div class="field">
+                <label for="timeoutInput">Timeout (ms)</label>
+                <input id="timeoutInput" type="number" min="1000" />
+              </div>
+              <div class="field">
+                <label for="maxWorkersInput">Max workers</label>
+                <input id="maxWorkersInput" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="proxyServerInput">Proxy server</label>
+                <input id="proxyServerInput" type="text" placeholder="http://host:port" />
+              </div>
+              <div class="field">
+                <label for="proxyUsernameInput">Proxy username</label>
+                <input id="proxyUsernameInput" type="text" placeholder="opsional" autocomplete="username" />
+              </div>
+              <div class="field full">
+                <label for="proxyPasswordInput">Proxy password</label>
+                <input id="proxyPasswordInput" type="password" placeholder="opsional" autocomplete="current-password" />
+              </div>
+            </div>
+          </details>
+
+          <div class="button-row">
+            <button class="btn-primary" id="startRunBtn" type="submit">Jalankan Sekarang</button>
+            <button class="btn-secondary" id="clearLogsBtn" type="button">Kosongkan Log</button>
+          </div>
+        </form>
+
+        <div class="status-strip">
+          <div>
+            <strong>Status</strong>
+            <div id="runStatus" class="helper">Siap menjalankan aksi dari browser.</div>
+          </div>
+          <div id="runPill" class="status-pill">Idle</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">Live Feed</span>
+            <h2 class="panel-title">Log Streaming</h2>
+          </div>
+          <span class="mono-chip" id="sessionChip">session: -</span>
+        </div>
+        <div class="log-box">
+          <div class="log-toolbar">
+            <span class="mono-chip">SSE live log</span>
+            <span class="mono-chip" id="eventStateChip">disconnected</span>
+          </div>
+          <pre class="log-output" id="logs">Menunggu proses...</pre>
+        </div>
+      </section>
+    </div>
+
+    <div class="layout bottom">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">Accounts</span>
+            <h2 class="panel-title">Akun Login</h2>
+          </div>
+          <div class="panel-actions">
+            <button class="btn-secondary" id="accountFormResetBtn" type="button">Reset Form</button>
+          </div>
+        </div>
+        <p class="panel-description">Setara menu terminal untuk simpan, lihat, hapus akun, dan clear session tersimpan.
+        </p>
+
+        <form id="accountForm">
+          <input id="accountPreviousEmail" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="accountEmailInput">Email</label>
+              <input id="accountEmailInput" type="email" placeholder="nama@email.com" autocomplete="email" required />
+            </div>
+            <div class="field">
+              <label for="accountPasswordInput">Password</label>
+              <input id="accountPasswordInput" type="text" placeholder="password akun" autocomplete="current-password"
+                required />
+            </div>
+            <div class="field full">
+              <label for="accountUsernameInput">Username (opsional)</label>
+              <input id="accountUsernameInput" type="text" placeholder="username duolingo" autocomplete="username" />
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" type="submit" id="saveAccountBtn">Simpan Akun</button>
+            <button class="btn-danger" type="button" id="deleteAccountsBtn">Hapus Akun Terpilih</button>
+            <button class="btn-secondary" type="button" id="clearSelectedSessionsBtn">Hapus Sesi Terpilih</button>
+            <button class="btn-warm" type="button" id="clearAllSessionsBtn">Hapus Semua Sesi</button>
+          </div>
+        </form>
+
+        <div class="table-wrap" style="margin-top:18px;">
+          <table>
+            <thead>
+              <tr>
+                <th><input id="accountSelectAll" type="checkbox" /></th>
+                <th>Login</th>
+                <th>Trial</th>
+                <th>Sesi</th>
+                <th>Email</th>
+                <th>Username</th>
+                <th>Last Login</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="accountsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="panel-kicker">VCC Vault</span>
+            <h2 class="panel-title">Kelola VCC</h2>
+          </div>
+          <div class="panel-actions">
+            <button class="btn-secondary" id="vccFormResetBtn" type="button">Reset Form</button>
+          </div>
+        </div>
+        <p class="panel-description">Setara menu terminal untuk lihat, tambah, edit, dan hapus isi
+          <code>vcc.json</code>.
+        </p>
+
+        <form id="vccForm">
+          <input id="vccEditingId" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="vccLabelInput">Label</label>
+              <input id="vccLabelInput" type="text" placeholder="Mis. Trial utama" />
+            </div>
+            <div class="field">
+              <label for="vccCardInput">Nomor kartu</label>
+              <input id="vccCardInput" type="text" placeholder="16-19 digit" autocomplete="cc-number" required />
+            </div>
+            <div class="field">
+              <label for="vccExpInput">Expired</label>
+              <input id="vccExpInput" type="text" placeholder="MM/YY atau MM/YYYY" autocomplete="cc-exp" required />
+            </div>
+            <div class="field">
+              <label for="vccCvcInput">CVC</label>
+              <input id="vccCvcInput" type="text" placeholder="3-4 digit" autocomplete="cc-csc" required />
+            </div>
+            <div class="field">
+              <label for="vccHolderInput">Nama pada kartu</label>
+              <input id="vccHolderInput" type="text" placeholder="opsional" autocomplete="cc-name" />
+            </div>
+            <div class="field">
+              <label for="vccPostalInput">Kode pos</label>
+              <input id="vccPostalInput" type="text" placeholder="opsional" autocomplete="postal-code" />
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" type="submit" id="saveVccBtn">Simpan VCC</button>
+            <button class="btn-danger" type="button" id="deleteVccBtn">Hapus VCC Terpilih</button>
+          </div>
+        </form>
+
+        <div class="table-wrap" style="margin-top:18px;">
+          <table>
+            <thead>
+              <tr>
+                <th><input id="vccSelectAll" type="checkbox" /></th>
+                <th>Label</th>
+                <th>Kartu</th>
+                <th>Exp</th>
+                <th>Holder</th>
+                <th>ZIP</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="vccTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <div>
+          <span class="panel-kicker">Run Result</span>
+          <h2 class="panel-title">Hasil Eksekusi</h2>
+        </div>
+      </div>
+      <div id="resultsEmpty" class="empty">Belum ada hasil run. Jalankan login dari panel atas untuk melihat hasilnya di
+        sini.</div>
+      <div class="table-wrap hidden" id="resultsWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Email</th>
+              <th>Username</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="resultsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      config: null,
+      accounts: [],
+      vccEntries: [],
+      results: [],
+      currentSessionId: null,
+      eventSource: null,
+    };
+
+    const els = {
+      statsGrid: document.getElementById('statsGrid'),
+      runMode: document.getElementById('runMode'),
+      singleAccountField: document.getElementById('singleAccountField'),
+      batchCountField: document.getElementById('batchCountField'),
+      singleAccountSelect: document.getElementById('singleAccountSelect'),
+      batchCountInput: document.getElementById('batchCountInput'),
+      passwordModeField: document.getElementById('passwordModeField'),
+      passwordModeSelect: document.getElementById('passwordModeSelect'),
+      afterLoginSelect: document.getElementById('afterLoginSelect'),
+      vccSelectField: document.getElementById('vccSelectField'),
+      vccSelect: document.getElementById('vccSelect'),
+      headlessToggle: document.getElementById('headlessToggle'),
+      submitWaitInput: document.getElementById('submitWaitInput'),
+      retryInput: document.getElementById('retryInput'),
+      slowMoInput: document.getElementById('slowMoInput'),
+      timeoutInput: document.getElementById('timeoutInput'),
+      maxWorkersInput: document.getElementById('maxWorkersInput'),
+      proxyServerInput: document.getElementById('proxyServerInput'),
+      proxyUsernameInput: document.getElementById('proxyUsernameInput'),
+      proxyPasswordInput: document.getElementById('proxyPasswordInput'),
+      runnerForm: document.getElementById('runnerForm'),
+      startRunBtn: document.getElementById('startRunBtn'),
+      clearLogsBtn: document.getElementById('clearLogsBtn'),
+      refreshDataBtn: document.getElementById('refreshDataBtn'),
+      runStatus: document.getElementById('runStatus'),
+      runPill: document.getElementById('runPill'),
+      logs: document.getElementById('logs'),
+      sessionChip: document.getElementById('sessionChip'),
+      eventStateChip: document.getElementById('eventStateChip'),
+      accountForm: document.getElementById('accountForm'),
+      accountPreviousEmail: document.getElementById('accountPreviousEmail'),
+      accountEmailInput: document.getElementById('accountEmailInput'),
+      accountPasswordInput: document.getElementById('accountPasswordInput'),
+      accountUsernameInput: document.getElementById('accountUsernameInput'),
+      saveAccountBtn: document.getElementById('saveAccountBtn'),
+      accountFormResetBtn: document.getElementById('accountFormResetBtn'),
+      deleteAccountsBtn: document.getElementById('deleteAccountsBtn'),
+      clearSelectedSessionsBtn: document.getElementById('clearSelectedSessionsBtn'),
+      clearAllSessionsBtn: document.getElementById('clearAllSessionsBtn'),
+      accountSelectAll: document.getElementById('accountSelectAll'),
+      accountsTableBody: document.getElementById('accountsTableBody'),
+      vccForm: document.getElementById('vccForm'),
+      vccEditingId: document.getElementById('vccEditingId'),
+      vccLabelInput: document.getElementById('vccLabelInput'),
+      vccCardInput: document.getElementById('vccCardInput'),
+      vccExpInput: document.getElementById('vccExpInput'),
+      vccCvcInput: document.getElementById('vccCvcInput'),
+      vccHolderInput: document.getElementById('vccHolderInput'),
+      vccPostalInput: document.getElementById('vccPostalInput'),
+      saveVccBtn: document.getElementById('saveVccBtn'),
+      vccFormResetBtn: document.getElementById('vccFormResetBtn'),
+      deleteVccBtn: document.getElementById('deleteVccBtn'),
+      vccSelectAll: document.getElementById('vccSelectAll'),
+      vccTableBody: document.getElementById('vccTableBody'),
+      resultsEmpty: document.getElementById('resultsEmpty'),
+      resultsWrap: document.getElementById('resultsWrap'),
+      resultsTableBody: document.getElementById('resultsTableBody'),
+    };
+
+    function createCell(tag, text, className = '') {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined && text !== null) element.textContent = text;
+      return element;
+    }
+
+    async function fetchJSON(url, options = {}) {
+      const response = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Request gagal');
+      }
+      return data;
+    }
+
+    function setRunStatus(message, tone = 'idle') {
+      els.runStatus.textContent = message;
+      els.runPill.textContent = tone === 'running' ? 'Running' : tone === 'error' ? 'Error' : tone === 'done' ? 'Done' : 'Idle';
+      els.runPill.classList.toggle('error', tone === 'error');
+    }
+
+    function appendLog(line) {
+      const current = els.logs.textContent === 'Menunggu proses...' ? '' : els.logs.textContent;
+      els.logs.textContent = `${current}${current ? '\n' : ''}${line}`;
+      els.logs.scrollTop = els.logs.scrollHeight;
+    }
+
+    function clearLogs() {
+      els.logs.textContent = 'Menunggu proses...';
+      els.sessionChip.textContent = 'session: -';
+      els.eventStateChip.textContent = 'disconnected';
+    }
+
+    function getBadgeClass(status) {
+      if (status === 'success' || status === 'bisa login' || status === 'claimed') return 'success';
+      if (status === 'failed' || status === 'gagal') return 'failed';
+      return 'neutral';
+    }
+
+    function formatDate(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('id-ID');
+    }
+
+    function renderStats() {
+      const stats = [
+        { label: 'Total Akun', value: state.accounts.length },
+        { label: 'Sesi Tersimpan', value: state.accounts.filter((account) => account.has_session).length },
+        { label: 'Login Success', value: state.accounts.filter((account) => account.login_badge === 'success').length },
+        { label: 'Trial Claimed', value: state.accounts.filter((account) => account.trial_badge === 'claimed').length },
+        { label: 'VCC Tersedia', value: state.vccEntries.length },
+      ];
+
+      els.statsGrid.innerHTML = '';
+      stats.forEach((item) => {
+        const card = document.createElement('article');
+        card.className = 'stat-card';
+        card.appendChild(createCell('span', item.label, 'stat-label'));
+        card.appendChild(createCell('strong', String(item.value), 'stat-value'));
+        els.statsGrid.appendChild(card);
+      });
+    }
+
+    function populateRunnerSelects() {
+      const selectedAccount = els.singleAccountSelect.value;
+      els.singleAccountSelect.innerHTML = '';
+      if (state.accounts.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Belum ada akun';
+        els.singleAccountSelect.appendChild(option);
+      } else {
+        state.accounts.forEach((account) => {
+          const option = document.createElement('option');
+          option.value = account.email;
+          option.textContent = `${account.email} ${account.username ? `| ${account.username}` : ''}`;
+          els.singleAccountSelect.appendChild(option);
+        });
+      }
+      if (selectedAccount && [...els.singleAccountSelect.options].some((option) => option.value === selectedAccount)) {
+        els.singleAccountSelect.value = selectedAccount;
+      }
+
+      const selectedVcc = els.vccSelect.value;
+      els.vccSelect.innerHTML = '';
+      if (state.vccEntries.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Belum ada VCC';
+        els.vccSelect.appendChild(option);
+      } else {
+        state.vccEntries.forEach((entry) => {
+          const option = document.createElement('option');
+          option.value = entry.id;
+          option.textContent = `${entry.display_label} | ${entry.masked_card} | ${entry.expDate}`;
+          els.vccSelect.appendChild(option);
+        });
+      }
+      if (selectedVcc && [...els.vccSelect.options].some((option) => option.value === selectedVcc)) {
+        els.vccSelect.value = selectedVcc;
+      }
+    }
+
+    function renderAccountsTable() {
+      els.accountsTableBody.innerHTML = '';
+      if (state.accounts.length === 0) {
+        const row = document.createElement('tr');
+        const cell = createCell('td', 'Belum ada akun di sign-in-account.json.', 'muted');
+        cell.colSpan = 8;
+        row.appendChild(cell);
+        els.accountsTableBody.appendChild(row);
+        return;
+      }
+
+      state.accounts.forEach((account) => {
+        const row = document.createElement('tr');
+        const checkboxCell = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = account.email;
+        checkbox.className = 'account-row-check';
+        checkboxCell.appendChild(checkbox);
+
+        const loginCell = document.createElement('td');
+        const loginBadge = createCell('span', account.login_label || 'belum', `badge ${getBadgeClass(account.login_badge)}`);
+        loginCell.appendChild(loginBadge);
+
+        const trialCell = document.createElement('td');
+        const trialBadge = createCell('span', account.trial_label || 'belum', `badge ${getBadgeClass(account.trial_badge)}`);
+        trialCell.appendChild(trialBadge);
+
+        const sessionCell = document.createElement('td');
+        const sessionBadge = createCell('span', account.has_session ? 'tersimpan' : 'kosong', `badge ${account.has_session ? 'success' : 'neutral'}`);
+        sessionCell.appendChild(sessionBadge);
+
+        const emailCell = createCell('td', account.email || '-', 'muted');
+        const usernameCell = createCell('td', account.username || '-', 'muted');
+        const lastLoginCell = createCell('td', formatDate(account.last_login_at), 'muted');
+
+        const actionCell = document.createElement('td');
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        const editBtn = createCell('button', 'Edit', 'mini-btn');
+        editBtn.type = 'button';
+        editBtn.dataset.action = 'edit-account';
+        editBtn.dataset.email = account.email;
+
+        const runBtn = createCell('button', 'Run', 'mini-btn');
+        runBtn.type = 'button';
+        runBtn.dataset.action = 'run-account';
+        runBtn.dataset.email = account.email;
+
+        const clearBtn = createCell('button', 'Clear Session', 'mini-btn');
+        clearBtn.type = 'button';
+        clearBtn.dataset.action = 'clear-account-session';
+        clearBtn.dataset.email = account.email;
+
+        actions.append(editBtn, runBtn, clearBtn);
+        actionCell.appendChild(actions);
+
+        row.append(checkboxCell, loginCell, trialCell, sessionCell, emailCell, usernameCell, lastLoginCell, actionCell);
+        els.accountsTableBody.appendChild(row);
+      });
+    }
+
+    function renderVccTable() {
+      els.vccTableBody.innerHTML = '';
+      if (state.vccEntries.length === 0) {
+        const row = document.createElement('tr');
+        const cell = createCell('td', 'Belum ada data VCC di vcc.json.', 'muted');
+        cell.colSpan = 7;
+        row.appendChild(cell);
+        els.vccTableBody.appendChild(row);
+        return;
+      }
+
+      state.vccEntries.forEach((entry) => {
+        const row = document.createElement('tr');
+        const checkboxCell = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = entry.id;
+        checkbox.className = 'vcc-row-check';
+        checkboxCell.appendChild(checkbox);
+
+        const labelCell = createCell('td', entry.display_label || '-', 'muted');
+        const cardCell = createCell('td', entry.masked_card || '-', 'muted');
+        const expCell = createCell('td', entry.expDate || '-', 'muted');
+        const holderCell = createCell('td', entry.cardholderName || '-', 'muted');
+        const zipCell = createCell('td', entry.postalCode || '-', 'muted');
+
+        const actionCell = document.createElement('td');
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        const useBtn = createCell('button', 'Use', 'mini-btn');
+        useBtn.type = 'button';
+        useBtn.dataset.action = 'use-vcc';
+        useBtn.dataset.id = entry.id;
+
+        const editBtn = createCell('button', 'Edit', 'mini-btn');
+        editBtn.type = 'button';
+        editBtn.dataset.action = 'edit-vcc';
+        editBtn.dataset.id = entry.id;
+
+        actions.append(useBtn, editBtn);
+        actionCell.appendChild(actions);
+
+        row.append(checkboxCell, labelCell, cardCell, expCell, holderCell, zipCell, actionCell);
+        els.vccTableBody.appendChild(row);
+      });
+    }
+
+    function renderResults() {
+      els.resultsTableBody.innerHTML = '';
+      if (!state.results.length) {
+        els.resultsEmpty.classList.remove('hidden');
+        els.resultsWrap.classList.add('hidden');
+        return;
+      }
+
+      state.results.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        const statusCell = document.createElement('td');
+        const badge = createCell('span', row.success ? 'Sukses' : 'Gagal', `badge ${row.success ? 'success' : 'failed'}`);
+        statusCell.appendChild(badge);
+        tr.append(
+          createCell('td', String(index + 1)),
+          statusCell,
+          createCell('td', row.email || '-', 'muted'),
+          createCell('td', row.username || '-', 'muted'),
+          createCell('td', row.success ? `${row.current_url || 'Logged in'}${row.trial_status ? ` | trial=${row.trial_status}` : row.after_login_status ? ` | trial=${row.after_login_status}` : ''}` : (row.error || '-'), 'muted'),
+        );
+        els.resultsTableBody.appendChild(tr);
+      });
+
+      els.resultsEmpty.classList.add('hidden');
+      els.resultsWrap.classList.remove('hidden');
+    }
+
+    function updateRunnerVisibility() {
+      const mode = els.runMode.value;
+      const afterLoginAction = els.afterLoginSelect.value;
+      const manualPassword = els.passwordModeSelect.value === 'manual';
+
+      els.singleAccountField.classList.toggle('hidden', mode !== 'single');
+      els.passwordModeField.classList.toggle('hidden', mode !== 'single');
+      els.batchCountField.classList.toggle('hidden', mode !== 'batch');
+      els.vccSelectField.classList.toggle('hidden', afterLoginAction !== 'trial-auto-vcc');
+
+      if (mode === 'batch') {
+        els.passwordModeSelect.value = 'auto';
+      }
+
+      if (manualPassword && mode === 'single') {
+        els.headlessToggle.value = 'false';
+        els.headlessToggle.disabled = true;
+      } else {
+        els.headlessToggle.disabled = false;
+      }
+    }
+
+    function resetAccountForm() {
+      els.accountForm.reset();
+      els.accountPreviousEmail.value = '';
+      els.saveAccountBtn.textContent = 'Simpan Akun';
+    }
+
+    function resetVccForm() {
+      els.vccForm.reset();
+      els.vccEditingId.value = '';
+      els.saveVccBtn.textContent = 'Simpan VCC';
+    }
+
+    function getSelectedAccountEmails() {
+      return Array.from(document.querySelectorAll('.account-row-check:checked')).map((checkbox) => checkbox.value);
+    }
+
+    function getSelectedVccIds() {
+      return Array.from(document.querySelectorAll('.vcc-row-check:checked')).map((checkbox) => checkbox.value);
+    }
+
+    async function loadData() {
+      const [configData, accountData, vccData] = await Promise.all([
+        fetchJSON('/api/config'),
+        fetchJSON('/api/accounts'),
+        fetchJSON('/api/vcc'),
+      ]);
+
+      state.config = configData;
+      state.accounts = accountData.accounts || [];
+      state.vccEntries = vccData.entries || [];
+
+      els.headlessToggle.value = String(configData.headless ?? false);
+      els.slowMoInput.value = configData.slow_mo ?? 70;
+      els.timeoutInput.value = configData.timeout ?? 30000;
+      els.maxWorkersInput.value = configData.max_workers ?? 1;
+      els.submitWaitInput.value = configData.submit_wait_seconds ?? 4;
+      els.retryInput.value = configData.login_retry_attempts ?? 5;
+
+      renderStats();
+      populateRunnerSelects();
+      renderAccountsTable();
+      renderVccTable();
+      renderResults();
+      updateRunnerVisibility();
+    }
+
+    function buildRunPayload() {
+      const mode = els.runMode.value;
+      const afterLoginAction = els.afterLoginSelect.value;
+      const payload = {
+        mode,
+        count: Number(els.batchCountInput.value || 1),
+        email: mode === 'single' ? els.singleAccountSelect.value : undefined,
+        manual_password: mode === 'single' && els.passwordModeSelect.value === 'manual',
+        after_login_action: afterLoginAction,
+        vcc_id: afterLoginAction === 'trial-auto-vcc' ? els.vccSelect.value : undefined,
+        headless: els.headlessToggle.value === 'true',
+        slow_mo: Number(els.slowMoInput.value || state.config?.slow_mo || 70),
+        timeout: Number(els.timeoutInput.value || state.config?.timeout || 30000),
+        max_workers: Number(els.maxWorkersInput.value || state.config?.max_workers || 1),
+        submit_wait_seconds: els.submitWaitInput.value === '' ? '' : Number(els.submitWaitInput.value),
+        login_retry_attempts: Number(els.retryInput.value || state.config?.login_retry_attempts || 5),
+        proxy_server: els.proxyServerInput.value.trim(),
+        proxy_username: els.proxyUsernameInput.value.trim(),
+        proxy_password: els.proxyPasswordInput.value.trim(),
+      };
+
+      if (mode === 'single' && !payload.email) {
+        throw new Error('Pilih akun untuk mode login satu akun.');
+      }
+      if (mode === 'batch' && payload.count < 1) {
+        throw new Error('Jumlah batch minimal 1.');
+      }
+      if (afterLoginAction === 'trial-auto-vcc' && !payload.vcc_id) {
+        throw new Error('Pilih VCC untuk claim trial otomatis.');
+      }
+
+      return payload;
+    }
+
+    function closeEventSource() {
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    }
+
+    async function startRun(payload) {
+      closeEventSource();
+      state.results = [];
+      renderResults();
+      clearLogs();
+      els.startRunBtn.disabled = true;
+      setRunStatus('Menjalankan session login dari browser...', 'running');
+
+      const startData = await fetchJSON('/api/login-session', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      state.currentSessionId = startData.session_id;
+      els.sessionChip.textContent = `session: ${startData.session_id}`;
+      els.eventStateChip.textContent = 'streaming';
+      appendLog(`[WEB] session start ${startData.session_id} | count=${startData.count}`);
+
+      const eventSource = new EventSource(`/api/login-session/${startData.session_id}/events`);
+      state.eventSource = eventSource;
+
+      eventSource.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'log') {
+            appendLog(`${data.entry.t} | ${data.entry.message}`);
+            return;
+          }
+
+          if (data.type === 'result') {
+            state.results = data.result?.results || [];
+            renderResults();
+
+            if (data.status === 'done') {
+              setRunStatus(`Selesai: ${data.result?.successCount || 0} sukses / ${data.result?.failedCount || 0} gagal.`, 'done');
+            } else {
+              setRunStatus(data.result?.error || 'Session gagal.', 'error');
+            }
+
+            appendLog(`[WEB] session selesai | status=${data.status}`);
+            els.eventStateChip.textContent = data.status;
+            closeEventSource();
+            els.startRunBtn.disabled = false;
+            await loadData();
+          }
+        } catch (error) {
+          appendLog(`[WEB] event invalid: ${event.data}`);
+        }
+      };
+
+      eventSource.onerror = () => {
+        els.eventStateChip.textContent = 'reconnecting';
+      };
+    }
+
+    els.runnerForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const payload = buildRunPayload();
+        await startRun(payload);
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+        els.startRunBtn.disabled = false;
+      }
+    });
+
+    els.runMode.addEventListener('change', updateRunnerVisibility);
+    els.afterLoginSelect.addEventListener('change', updateRunnerVisibility);
+    els.passwordModeSelect.addEventListener('change', updateRunnerVisibility);
+    els.clearLogsBtn.addEventListener('click', clearLogs);
+    els.refreshDataBtn.addEventListener('click', async () => {
+      try {
+        await loadData();
+        setRunStatus('Data akun dan VCC sudah di-refresh.', 'idle');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.accountForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await fetchJSON('/api/accounts', {
+          method: 'POST',
+          body: JSON.stringify({
+            previous_email: els.accountPreviousEmail.value.trim(),
+            email: els.accountEmailInput.value.trim(),
+            password: els.accountPasswordInput.value.trim(),
+            username: els.accountUsernameInput.value.trim(),
+          }),
+        });
+        resetAccountForm();
+        await loadData();
+        setRunStatus('Akun berhasil disimpan.', 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.accountFormResetBtn.addEventListener('click', resetAccountForm);
+    els.deleteAccountsBtn.addEventListener('click', async () => {
+      const emails = getSelectedAccountEmails();
+      if (emails.length === 0) {
+        setRunStatus('Pilih akun yang ingin dihapus.', 'error');
+        return;
+      }
+      if (!window.confirm(`Hapus ${emails.length} akun terpilih?`)) return;
+      try {
+        await fetchJSON('/api/accounts', {
+          method: 'DELETE',
+          body: JSON.stringify({ emails, remove_sessions: true }),
+        });
+        await loadData();
+        setRunStatus(`${emails.length} akun berhasil dihapus.`, 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.clearSelectedSessionsBtn.addEventListener('click', async () => {
+      const emails = getSelectedAccountEmails();
+      if (emails.length === 0) {
+        setRunStatus('Pilih akun yang sesi-nya ingin dihapus.', 'error');
+        return;
+      }
+      if (!window.confirm(`Hapus sesi login untuk ${emails.length} akun terpilih?`)) return;
+      try {
+        await fetchJSON('/api/sessions/clear', {
+          method: 'POST',
+          body: JSON.stringify({ scope: 'selected', emails }),
+        });
+        await loadData();
+        setRunStatus(`${emails.length} sesi akun berhasil dihapus.`, 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.clearAllSessionsBtn.addEventListener('click', async () => {
+      if (!window.confirm('Hapus semua sesi login tersimpan?')) return;
+      try {
+        await fetchJSON('/api/sessions/clear', {
+          method: 'POST',
+          body: JSON.stringify({ scope: 'all' }),
+        });
+        await loadData();
+        setRunStatus('Semua sesi login berhasil dihapus.', 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.accountsTableBody.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const email = button.dataset.email;
+      const account = state.accounts.find((item) => item.email === email);
+      if (!account) return;
+
+      if (button.dataset.action === 'edit-account') {
+        els.accountPreviousEmail.value = account.email;
+        els.accountEmailInput.value = account.email || '';
+        els.accountPasswordInput.value = account.password || '';
+        els.accountUsernameInput.value = account.username || '';
+        els.saveAccountBtn.textContent = 'Update Akun';
+        els.accountEmailInput.focus();
+        return;
+      }
+
+      if (button.dataset.action === 'run-account') {
+        els.runMode.value = 'single';
+        els.singleAccountSelect.value = account.email;
+        updateRunnerVisibility();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setRunStatus(`Runner diarahkan ke akun ${account.email}.`, 'idle');
+        return;
+      }
+
+      if (button.dataset.action === 'clear-account-session') {
+        window.confirm(`Hapus sesi login untuk ${account.email}?`) && fetchJSON('/api/sessions/clear', {
+          method: 'POST',
+          body: JSON.stringify({ scope: 'selected', emails: [account.email] }),
+        }).then(loadData).then(() => {
+          setRunStatus(`Sesi ${account.email} berhasil dihapus.`, 'done');
+        }).catch((error) => {
+          setRunStatus(error.message, 'error');
+        });
+      }
+    });
+
+    els.accountSelectAll.addEventListener('change', () => {
+      document.querySelectorAll('.account-row-check').forEach((checkbox) => {
+        checkbox.checked = els.accountSelectAll.checked;
+      });
+    });
+
+    els.vccForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        label: els.vccLabelInput.value.trim(),
+        cardNumber: els.vccCardInput.value.trim(),
+        expDate: els.vccExpInput.value.trim(),
+        cvc: els.vccCvcInput.value.trim(),
+        cardholderName: els.vccHolderInput.value.trim(),
+        postalCode: els.vccPostalInput.value.trim(),
+      };
+
+      try {
+        if (els.vccEditingId.value) {
+          await fetchJSON(`/api/vcc/${els.vccEditingId.value}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          });
+        } else {
+          await fetchJSON('/api/vcc', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+        }
+        resetVccForm();
+        await loadData();
+        setRunStatus('Data VCC berhasil disimpan.', 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.vccFormResetBtn.addEventListener('click', resetVccForm);
+    els.deleteVccBtn.addEventListener('click', async () => {
+      const ids = getSelectedVccIds();
+      if (ids.length === 0) {
+        setRunStatus('Pilih VCC yang ingin dihapus.', 'error');
+        return;
+      }
+      if (!window.confirm(`Hapus ${ids.length} VCC terpilih?`)) return;
+      try {
+        await fetchJSON('/api/vcc', {
+          method: 'DELETE',
+          body: JSON.stringify({ ids }),
+        });
+        await loadData();
+        setRunStatus(`${ids.length} VCC berhasil dihapus.`, 'done');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    });
+
+    els.vccTableBody.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const entry = state.vccEntries.find((item) => item.id === button.dataset.id);
+      if (!entry) return;
+
+      if (button.dataset.action === 'use-vcc') {
+        els.afterLoginSelect.value = 'trial-auto-vcc';
+        els.vccSelect.value = entry.id;
+        updateRunnerVisibility();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setRunStatus(`VCC ${entry.display_label} siap dipakai di runner.`, 'idle');
+        return;
+      }
+
+      if (button.dataset.action === 'edit-vcc') {
+        els.vccEditingId.value = entry.id;
+        els.vccLabelInput.value = entry.label || '';
+        els.vccCardInput.value = entry.cardNumber || '';
+        els.vccExpInput.value = entry.expDate || '';
+        els.vccCvcInput.value = entry.cvc || '';
+        els.vccHolderInput.value = entry.cardholderName || '';
+        els.vccPostalInput.value = entry.postalCode || '';
+        els.saveVccBtn.textContent = 'Update VCC';
+        els.vccLabelInput.focus();
+      }
+    });
+
+    els.vccSelectAll.addEventListener('change', () => {
+      document.querySelectorAll('.vcc-row-check').forEach((checkbox) => {
+        checkbox.checked = els.vccSelectAll.checked;
+      });
+    });
+
+    (async function init() {
+      try {
+        clearLogs();
+        setRunStatus('Memuat data awal dari server...', 'idle');
+        await loadData();
+        setRunStatus('Semua panel siap dipakai.', 'idle');
+      } catch (error) {
+        setRunStatus(error.message, 'error');
+      }
+    })();
+  </script>
+</body>
+
+</html>

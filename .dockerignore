@@ -1,0 +1,10 @@
+node_modules
+debug
+.profiles
+.git
+.env
+.env.*
+config.json
+accounts.json
+sign-in-account.json
+vcc.json

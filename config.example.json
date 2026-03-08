@@ -1,0 +1,20 @@
+{
+  "browser": "chromium",
+  "persistent_profile": true,
+  "profile_dir": ".profiles/duolingo-chromium",
+  "max_workers": 1,
+  "headless": true,
+  "force_headed_login": false,
+  "show_pointer": false,
+  "slow_mo": 70,
+  "timeout": 30000,
+  "submit_wait_seconds": 4,
+  "login_retry_attempts": 5,
+  "manual_password": false,
+  "password": "",
+  "proxy": {
+    "server": "",
+    "username": "",
+    "password": ""
+  }
+}

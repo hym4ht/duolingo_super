@@ -1,0 +1,13 @@
+node_modules/
+.profiles/
+debug/
+.env
+.env.*
+
+config.json
+accounts.json
+sign-in-account.json
+vcc.json
+
+.DS_Store
+Thumbs.db

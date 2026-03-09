@@ -186,7 +186,7 @@ async function resolveVccData(body = {}) {
 async function buildOverridesFromBody(body = {}) {
     const manualPassword = toBoolean(body.manual_password, config.manual_password === true);
     const overrides = {
-        ...(body.password ? { password: String(body.password).trim() } : {}),
+        ...(body.password !== undefined ? { password: String(body.password) } : {}),
         ...(body.browser ? { browser: String(body.browser).trim().toLowerCase() } : {}),
         ...(body.profile_dir ? { profile_dir: String(body.profile_dir).trim() } : {}),
         ...(body.persistent_profile !== undefined ? { persistent_profile: toBoolean(body.persistent_profile, true) } : {}),
@@ -198,6 +198,7 @@ async function buildOverridesFromBody(body = {}) {
         ...(body.max_workers !== undefined ? { max_workers: toNumber(body.max_workers, config.max_workers) } : {}),
         ...(body.submit_wait_seconds !== undefined ? { submit_wait_seconds: body.submit_wait_seconds === '' ? '' : toNumber(body.submit_wait_seconds, config.submit_wait_seconds ?? 4) } : {}),
         ...(body.login_retry_attempts !== undefined ? { login_retry_attempts: toNumber(body.login_retry_attempts, config.login_retry_attempts ?? 5) } : {}),
+        ...(body.trial_failure_hold_seconds !== undefined ? { trial_failure_hold_seconds: toNumber(body.trial_failure_hold_seconds, config.trial_failure_hold_seconds ?? 20) } : {}),
         ...(body.after_login_action ? { after_login_action: String(body.after_login_action).trim().toLowerCase() } : {}),
         ...(body.manual_password !== undefined ? { manual_password: manualPassword } : {}),
     };
@@ -211,7 +212,9 @@ async function buildOverridesFromBody(body = {}) {
         overrides.proxy = {
             server: proxyServer,
             username: String(body.proxy_username || '').trim() || undefined,
-            password: String(body.proxy_password || '').trim() || undefined,
+            password: body.proxy_password !== undefined
+                ? (String(body.proxy_password) || undefined)
+                : undefined,
         };
     }
 
@@ -383,7 +386,7 @@ app.get('/api/accounts', async (_req, res) => {
 app.post('/api/accounts', async (req, res) => {
     try {
         const email = String(req.body?.email || '').trim();
-        const password = String(req.body?.password || '').trim();
+        const password = String(req.body?.password || '');
         const username = String(req.body?.username || '').trim();
         if (!/.+@.+\..+/.test(email)) {
             throw new Error('Email tidak valid.');

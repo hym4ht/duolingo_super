@@ -87,10 +87,41 @@ export function normalizeTrialPaymentData(rawValue = {}) {
     }
 
     return {
+        id: payment.id,
+        label: payment.label,
         cardNumber: payment.cardNumber,
         expDate: `${payment.expMonth}${payment.expYear.slice(-2)}`,
         cvc: payment.cvc,
         cardholderName: payment.cardholderName,
         postalCode: payment.postalCode,
     };
+}
+
+export function normalizeTrialPaymentCandidates(primaryValue = null, candidateValues = []) {
+    const candidates = [];
+    const seen = new Set();
+
+    const pushCandidate = (value) => {
+        const normalized = normalizeTrialPaymentData(value);
+        if (!normalized) return;
+
+        const key = [
+            normalized.cardNumber,
+            normalized.expDate,
+            normalized.cvc,
+            normalized.cardholderName,
+            normalized.postalCode,
+        ].join('|');
+
+        if (seen.has(key)) return;
+        seen.add(key);
+        candidates.push(normalized);
+    };
+
+    pushCandidate(primaryValue);
+    for (const candidate of Array.isArray(candidateValues) ? candidateValues : []) {
+        pushCandidate(candidate);
+    }
+
+    return candidates;
 }

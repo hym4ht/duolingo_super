@@ -23,10 +23,21 @@ export function resolveDataFile(name) {
     return join(resolveDataDir(), name);
 }
 
-export function resolveDefaultProfileDir() {
+function normalizeBrowserKey(browser = 'chromium') {
+    const normalized = String(browser || 'chromium').trim().toLowerCase();
+    if (['chrome', 'chrome-stable', 'google-chrome', 'google-chrome-stable'].includes(normalized)) {
+        return 'chrome-stable';
+    }
+    return 'chromium';
+}
+
+export function resolveDefaultProfileDir(browser = 'chromium') {
     const explicitProfileDir = String(process.env.PROFILE_DIR || '').trim();
     if (explicitProfileDir) return resolve(explicitProfileDir);
-    return resolve(resolveDataDir(), '.profiles', 'duolingo-chromium');
+    const profileFolder = normalizeBrowserKey(browser) === 'chrome-stable'
+        ? 'duolingo-google-chrome'
+        : 'duolingo-chromium';
+    return resolve(resolveDataDir(), '.profiles', profileFolder);
 }
 
 export function resolveDebugDir() {

@@ -485,11 +485,14 @@
     }
 
     function printBanner() {
+        const browserLabel = String(config.browser || 'chromium').trim().toLowerCase() === 'chrome-stable'
+            ? 'Chrome Stable (Playwright)'
+            : 'Chromium (Playwright)';
         console.clear();
         console.log(chalk.bold.green('╔══════════════════════════════════════════════╗'));
         console.log(chalk.bold.green('║') + chalk.bold.white('   DUOLINGO LOGIN AUTOMATION                   ') + chalk.bold.green('║'));
         console.log(chalk.bold.green('║') + chalk.gray('   Source: sign-in-account.json                ') + chalk.bold.green('║'));
-        console.log(chalk.bold.green('║') + chalk.gray('   Browser: Chromium (Playwright)             ') + chalk.bold.green('║'));
+        console.log(chalk.bold.green('║') + chalk.gray(`   Browser: ${browserLabel.padEnd(31, ' ')}║`));
         console.log(chalk.bold.green('╚══════════════════════════════════════════════╝'));
         console.log();
         console.log(chalk.bold('  Config yang dipakai:'));

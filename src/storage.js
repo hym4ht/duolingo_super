@@ -10,6 +10,7 @@ import { resolveDataFile } from './runtime-paths.js';
 const ACCOUNTS_FILE = resolveDataFile('accounts.json');
 const SIGN_IN_ACCOUNTS_FILE = resolveDataFile('sign-in-account.json');
 const VCC_FILE = resolveDataFile('vcc.json');
+const FAMILY_LINKS_FILE = resolveDataFile('link-family.json');
 
 function buildStoredTrialSnapshot(account = {}) {
     return {
@@ -26,6 +27,7 @@ function deriveStoredTrialSnapshot(account = {}, result = {}, now = new Date().t
     const current = buildStoredTrialSnapshot(account);
     const currentTrialState = normalizeTrialStatus(current.trial_status);
     const explicitTrialState = normalizeTrialStatus(result?.trial_status);
+    const afterLoginAction = String(result?.after_login_action || '').trim().toLowerCase();
 
     const applyStatus = (key, metadata = {}) => {
         if (key === TRIAL_STATE_KEYS.unknown) {
@@ -58,24 +60,29 @@ function deriveStoredTrialSnapshot(account = {}, result = {}, now = new Date().t
         return applyStatus(explicitTrialState, {
             trial_last_action: result?.trial_action
                 ? String(result.trial_action)
-                : current.trial_last_action,
+                : (afterLoginAction === 'trial-manual' || afterLoginAction === 'trial-auto-vcc'
+                    ? afterLoginAction
+                    : current.trial_last_action),
             trial_last_status: result?.trial_status
                 ? String(result.trial_status)
-                : current.trial_last_status,
+                : (result?.after_login_status
+                    ? String(result.after_login_status)
+                    : current.trial_last_status),
             trial_last_error: result?.trial_error
                 ? String(result.trial_error)
-                : null,
+                : (result?.after_login_error
+                    ? String(result.after_login_error)
+                    : null),
         });
     }
 
-    const action = String(result?.after_login_action || '').trim().toLowerCase();
-    if (action !== 'trial-manual' && action !== 'trial-auto-vcc') {
+    if (afterLoginAction !== 'trial-manual' && afterLoginAction !== 'trial-auto-vcc') {
         return current;
     }
 
     const derivedTrialState = normalizeTrialStatus(result?.after_login_status);
     return applyStatus(derivedTrialState, {
-        trial_last_action: action,
+        trial_last_action: afterLoginAction,
         trial_last_status: result?.after_login_status ? String(result.after_login_status) : null,
         trial_last_error: result?.after_login_error ? String(result.after_login_error) : null,
     });
@@ -202,6 +209,51 @@ export async function loadVccEntries() {
     return parseVccFileContent(await loadVccRawText());
 }
 
+export async function loadFamilyLinks() {
+    return await readAccountsFile(FAMILY_LINKS_FILE);
+}
+
+export async function saveFamilyLink(entry = {}) {
+    const email = String(entry?.email || entry?.account_email || '').trim().toLowerCase();
+    const inviteLink = String(entry?.invite_link || entry?.inviteLink || '').trim();
+    const username = String(entry?.username || '').trim();
+
+    if (!email) {
+        throw new Error('Email akun wajib diisi untuk menyimpan link family.');
+    }
+    if (!inviteLink) {
+        throw new Error('Invite link family wajib diisi.');
+    }
+
+    const entries = await loadFamilyLinks();
+    const now = new Date().toISOString();
+    const index = entries.findIndex((item) => String(item?.email || '').trim().toLowerCase() === email);
+    const nextEntry = {
+        ...(index >= 0 ? entries[index] : {}),
+        email,
+        username,
+        invite_link: inviteLink,
+        updated_at: now,
+        created_at: index >= 0
+            ? (entries[index]?.created_at || now)
+            : now,
+    };
+
+    if (index >= 0) {
+        entries[index] = nextEntry;
+    } else {
+        entries.push(nextEntry);
+    }
+
+    await writeJson(FAMILY_LINKS_FILE, entries, { spaces: 2 });
+    return {
+        count: entries.length,
+        updated: index >= 0,
+        index: index >= 0 ? index : entries.length - 1,
+        entry: nextEntry,
+    };
+}
+
 export async function saveVccEntry(entry = {}) {
     const normalized = normalizeVccEntry(entry, entry?.id || randomUUID());
     if (!normalized) {
@@ -261,7 +313,7 @@ export async function deleteVccEntries(ids = []) {
 export async function saveSignInAccount(account) {
     const accounts = await loadSignInAccounts();
     const email = String(account?.email || '').trim();
-    const password = String(account?.password || '').trim();
+    const password = String(account?.password || '');
     const username = String(account?.username || '').trim();
     const now = new Date().toISOString();
 

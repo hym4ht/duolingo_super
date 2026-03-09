@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from 'fs';
 import { resolve } from 'path';
+import { resolveDefaultProfileDir } from './runtime-paths.js';
 
 // Helper ini dipakai bersama oleh CLI, web UI, dan runner Playwright
 // supaya aturan validasi akun dan lokasi session profile tetap konsisten.
@@ -17,12 +18,12 @@ export const TRIAL_STATE_KEYS = {
 };
 
 const CLAIMED_TRIAL_STATUS = new Set(['claimed', 'claim', 'success', 'active', 'trial-active']);
-const SUBMITTED_TRIAL_STATUS = new Set(['submitted', 'processing', 'pending', 'payment-submitted', 'vcc-injected-success']);
-const FAILED_TRIAL_STATUS = new Set(['failed', 'error', 'rejected', 'vcc-inject-failed']);
+const SUBMITTED_TRIAL_STATUS = new Set(['submitted', 'processing', 'pending', 'payment-submitted']);
+const FAILED_TRIAL_STATUS = new Set(['failed', 'error', 'rejected', 'vcc-inject-failed', 'vcc-submit-failed']);
 
 export function normalizeLoginAccount(account, runtimeConfig = {}) {
     const email = String(account?.email || '').trim();
-    const password = String(account?.password || runtimeConfig.password || '').trim();
+    const password = String(account?.password ?? runtimeConfig.password ?? '');
     const username = String(account?.username || '').trim() || null;
 
     if (!email || (!password && runtimeConfig.manual_password !== true)) {
@@ -39,7 +40,7 @@ export function normalizeLoginAccount(account, runtimeConfig = {}) {
 
 export function hasUsablePassword(account, runtimeConfig = {}) {
     if (runtimeConfig.manual_password === true) return true;
-    return Boolean(String(account?.password || runtimeConfig.password || '').trim());
+    return String(account?.password ?? runtimeConfig.password ?? '') !== '';
 }
 
 export function getLoginAccountsForMode(accounts = [], runtimeConfig = {}) {
@@ -63,7 +64,7 @@ export function normalizeTrialStatus(value) {
 }
 
 export function resolveBaseProfileDir(runtimeConfig = {}) {
-    return resolve(String(runtimeConfig?.profile_dir || '.profiles/duolingo-chromium'));
+    return resolve(String(runtimeConfig?.profile_dir || resolveDefaultProfileDir(runtimeConfig?.browser)));
 }
 
 export function resolveLoginSessionDir(account, runtimeConfig = {}) {

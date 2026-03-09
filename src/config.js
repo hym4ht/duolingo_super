@@ -15,6 +15,7 @@ const DEFAULT_CONFIG = {
     timeout: 30000,
     submit_wait_seconds: 4,
     login_retry_attempts: 5,
+    trial_failure_hold_seconds: 20,
     manual_password: true,
     password: '',
     proxy: {
@@ -34,6 +35,12 @@ function readStringEnv(name) {
     if (raw === undefined) return undefined;
     const value = String(raw).trim();
     return value === '' ? '' : value;
+}
+
+function readSecretEnv(name) {
+    const raw = process.env[name];
+    if (raw === undefined) return undefined;
+    return String(raw);
 }
 
 function readBooleanEnv(name) {
@@ -67,7 +74,7 @@ function readRailwayDefaults() {
 function readEnvConfig() {
     const proxyServer = readStringEnv('PROXY_SERVER');
     const proxyUsername = readStringEnv('PROXY_USERNAME');
-    const proxyPassword = readStringEnv('PROXY_PASSWORD');
+    const proxyPassword = readSecretEnv('PROXY_PASSWORD');
     const proxy = proxyServer !== undefined
         ? {
             server: proxyServer,
@@ -88,8 +95,9 @@ function readEnvConfig() {
         ...(readNumberEnv('MAX_WORKERS') !== undefined ? { max_workers: readNumberEnv('MAX_WORKERS') } : {}),
         ...(readNumberEnv('SUBMIT_WAIT_SECONDS') !== undefined ? { submit_wait_seconds: readNumberEnv('SUBMIT_WAIT_SECONDS') } : {}),
         ...(readNumberEnv('LOGIN_RETRY_ATTEMPTS') !== undefined ? { login_retry_attempts: readNumberEnv('LOGIN_RETRY_ATTEMPTS') } : {}),
+        ...(readNumberEnv('TRIAL_FAILURE_HOLD_SECONDS') !== undefined ? { trial_failure_hold_seconds: readNumberEnv('TRIAL_FAILURE_HOLD_SECONDS') } : {}),
         ...(readBooleanEnv('MANUAL_PASSWORD') !== undefined ? { manual_password: readBooleanEnv('MANUAL_PASSWORD') } : {}),
-        ...(readStringEnv('DEFAULT_ACCOUNT_PASSWORD') !== undefined ? { password: readStringEnv('DEFAULT_ACCOUNT_PASSWORD') } : {}),
+        ...(readSecretEnv('DEFAULT_ACCOUNT_PASSWORD') !== undefined ? { password: readSecretEnv('DEFAULT_ACCOUNT_PASSWORD') } : {}),
         ...(proxy ? { proxy } : {}),
     };
 }
@@ -126,6 +134,7 @@ export function buildPublicConfig(config = {}) {
         max_workers: config.max_workers,
         submit_wait_seconds: config.submit_wait_seconds,
         login_retry_attempts: config.login_retry_attempts,
+        trial_failure_hold_seconds: config.trial_failure_hold_seconds,
         manual_password: config.manual_password,
         default_password_configured: Boolean(String(config.password || '').trim()),
         proxy_enabled: Boolean(String(config.proxy?.server || '').trim()),

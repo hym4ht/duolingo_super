@@ -13,15 +13,16 @@
 //   8. Isi email + password → submit
 
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
     resolveBaseProfileDir,
     resolveLoginSessionDir,
 } from './account-session.js';
-import { normalizeTrialPaymentData } from './payment.js';
+import { normalizeTrialPaymentCandidates, normalizeTrialPaymentData } from './payment.js';
 import { normalizeProxyConfig, verifyBrowserProxy } from './proxy.js';
 import { resolveDebugDir } from './runtime-paths.js';
+import { loadVccEntries } from './storage.js';
 import { ensureVirtualDisplay } from './virtual-display.js';
 
 const SELECTORS = {
@@ -54,6 +55,35 @@ const TRIAL_CTA_TEXT = /coba 1 minggu gratis|try 1 week free/i;
 const PLUS_CONTINUE_SELECTOR = '[data-test="plus-continue"], button:has-text("Lanjutkan"), button:has-text("Continue")';
 const TRIAL_PLAN_SELECTOR = '[data-test*="stripe_subscription"][data-test*="trial"], [data-test*="subscription_premium_trial"], [data-test*="premium_trial"], [data-test*="trial7"]';
 const STRIPE_IFRAME_SELECTOR = 'iframe[name^="__privateStripeFrame"], iframe[src*="stripe.com"]';
+const STORED_CARD_SUBMIT_SELECTOR = '[data-test="cc-submit-button"]';
+const STORED_CARD_USE_ANOTHER_SELECTOR = '[data-test="use-another-card"]';
+const STORED_CARD_LAST4_PATTERN = /ending in\s*(\d{4})/i;
+const FAMILY_HOME_SELECTOR = '[data-test="home"]';
+const FAMILY_ADD_MEMBER_PATTERNS = [
+    /^Add member Add member 5 spots$/i,
+    /Add member.*5 spots/i,
+    /^Add member$/i,
+];
+const FAMILY_COPY_BUTTON_PATTERNS = [/^COPY$/i, /^Copy$/i];
+const RETRYABLE_PAYMENT_ERROR_PATTERNS = [
+    /card rejected|card was rejected|correct card info/i,
+    /card was declined|declined/i,
+    /incorrect|invalid|expired|insufficient/i,
+    /try another card|unable to authorize|unable to process/i,
+];
+const TRIAL_ACTIVE_TEXT_PATTERNS = [
+    /manage subscription|manage plan|current plan|your plan/i,
+    /you(?:'| a)?re on super|welcome to super|super is active/i,
+    /trial (?:started|active)|langganan aktif|trial aktif/i,
+];
+const PAYMENT_ERROR_TEXT_PATTERNS = [
+    /card rejected|card was rejected|correct card info/i,
+    /card was declined|payment failed|payment was not completed/i,
+    /your card|this card|card number|security code|postal code|zip code/i,
+    /declined|expired|invalid|incorrect|incomplete|insufficient/i,
+    /unable to authorize|unable to process|try another card/i,
+    /ditolak|kedaluwarsa|tidak valid|tidak lengkap|gagal/i,
+];
 const LEARN_EXIT_SELECTOR = [
     SELECTORS.quitButton,
     '[data-test="close-button"]',
@@ -75,6 +105,27 @@ const LOGIN_ERROR_PATTERNS = [
     /wrong (email|username) or password|incorrect (email|username) or password|email atau kata sandi salah|nama pengguna atau kata sandi salah/i,
     /wrong|incorrect|invalid|salah|try again|coba lagi|captcha|blocked|terlalu banyak|suspicious/i,
 ];
+const NON_RETRYABLE_LOGIN_ERROR_PATTERNS = [
+    /wrong password|incorrect password|invalid password|password salah|kata sandi salah/i,
+    /wrong (email|username)|incorrect (email|username)|invalid (email|username)/i,
+    /wrong (email|username) or password|incorrect (email|username) or password|email atau kata sandi salah|nama pengguna atau kata sandi salah/i,
+    /credential|authorized to access|unauthorized|401/i,
+    /captcha|blocked|verification|verifikasi|suspicious|terlalu banyak|too many/i,
+];
+const LOGIN_API_SUCCESS_SETTLE_DELAY_MS = 5000;
+const DEFAULT_TIMEZONE = String(process.env.TZ || 'Asia/Jakarta').trim() || 'Asia/Jakarta';
+const DEFAULT_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+const DEFAULT_BROWSER_ARGS = [
+    '--disable-blink-features=AutomationControlled',
+    '--lang=id-ID',
+];
+const CHROME_STABLE_CANDIDATES = [
+    process.env.BROWSER_EXECUTABLE_PATH,
+    process.env.GOOGLE_CHROME_BIN,
+    process.env.CHROME_BIN,
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+].filter(Boolean);
 
 function generateUsername(email) {
     const prefix = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
@@ -192,6 +243,113 @@ function mountPointerOverlayScript() {
         }, { once: true });
     } else {
         ensurePointer();
+    }
+}
+
+function mountBrowserStealthScript(options = {}) {
+    const locale = Array.isArray(options.languages) && options.languages.length > 0
+        ? options.languages
+        : ['id-ID', 'id', 'en-US', 'en'];
+    const primaryLanguage = String(locale[0] || 'id-ID');
+
+    const defineGetter = (target, key, value) => {
+        try {
+            Object.defineProperty(target, key, {
+                configurable: true,
+                get: () => value,
+            });
+        } catch { /* ignore */ }
+    };
+
+    defineGetter(navigator, 'webdriver', false);
+    defineGetter(navigator, 'language', primaryLanguage);
+    defineGetter(navigator, 'languages', locale);
+    defineGetter(navigator, 'platform', String(options.platform || 'Win32'));
+    defineGetter(navigator, 'hardwareConcurrency', Number(options.hardwareConcurrency || 8));
+
+    if (!window.chrome) {
+        window.chrome = { runtime: {} };
+    } else if (!window.chrome.runtime) {
+        window.chrome.runtime = {};
+    }
+
+    const permissions = window.navigator?.permissions;
+    const originalQuery = permissions?.query?.bind(permissions);
+    if (originalQuery) {
+        permissions.query = (parameters) => {
+            if (parameters?.name === 'notifications') {
+                return Promise.resolve({ state: Notification.permission });
+            }
+            return originalQuery(parameters);
+        };
+    }
+}
+
+function findExecutablePath(candidates = []) {
+    for (const candidate of candidates) {
+        const target = String(candidate || '').trim();
+        if (!target) continue;
+        if (existsSync(target)) return target;
+    }
+    return null;
+}
+
+function resolveBrowserSelection(browserName = 'chromium') {
+    const normalized = String(browserName || 'chromium').trim().toLowerCase();
+
+    if (['chrome', 'chrome-stable', 'google-chrome', 'google-chrome-stable'].includes(normalized)) {
+        const executablePath = findExecutablePath(CHROME_STABLE_CANDIDATES);
+        if (!executablePath) {
+            throw new Error('Google Chrome Stable tidak ditemukan. Set BROWSER_EXECUTABLE_PATH atau CHROME_BIN.');
+        }
+        return {
+            key: 'chrome-stable',
+            label: 'google-chrome-stable',
+            executablePath,
+        };
+    }
+
+    return {
+        key: 'chromium',
+        label: 'chromium',
+        executablePath: null,
+    };
+}
+
+function buildLaunchOptions({ browser, headless, slowMo, proxy, userAgent } = {}) {
+    const browserSelection = resolveBrowserSelection(browser);
+    const launchOptions = {
+        headless,
+        slowMo,
+        viewport: { width: 1280, height: 800 },
+        locale: 'id-ID',
+        timezoneId: DEFAULT_TIMEZONE,
+        userAgent: String(userAgent || DEFAULT_DESKTOP_USER_AGENT),
+        args: [...DEFAULT_BROWSER_ARGS],
+    };
+
+    if (browserSelection.executablePath) {
+        launchOptions.executablePath = browserSelection.executablePath;
+    }
+
+    if (proxy) {
+        launchOptions.proxy = proxy;
+    }
+
+    return {
+        launchOptions,
+        browserSelection,
+    };
+}
+
+async function installContextScripts(context, { showPointer } = {}) {
+    await context.addInitScript(mountBrowserStealthScript, {
+        languages: ['id-ID', 'id', 'en-US', 'en'],
+        platform: 'Win32',
+        hardwareConcurrency: 8,
+    });
+    if (showPointer) {
+        await context.addInitScript(mountPointerOverlayScript);
     }
 }
 
@@ -927,6 +1085,17 @@ function isAuthenticatedDestinationUrl(url) {
     }
 }
 
+function isPendingLoginUrl(url) {
+    try {
+        const parsed = new URL(url);
+        return /duolingo\.com/i.test(parsed.hostname)
+            && parsed.pathname === '/'
+            && parsed.searchParams.has('isLoggingIn');
+    } catch {
+        return false;
+    }
+}
+
 async function isAuthenticatedPage(page) {
     const profileVisible =
         await page.locator(`${SELECTORS.profileAvatar}, [data-test="profile-menu"], [data-test="user-avatar"], img[alt="profile"]`).first().isVisible().catch(() => false);
@@ -934,11 +1103,29 @@ async function isAuthenticatedPage(page) {
     return isAuthenticatedDestinationUrl(page.url()) && !await isLoginFormVisible(page);
 }
 
+async function hasCompletedLoginRedirect(page, initialUrl = '') {
+    const currentUrl = String(page?.url?.() || '');
+    if (!currentUrl || currentUrl === String(initialUrl || '')) return false;
+    if (isPendingLoginUrl(currentUrl)) return false;
+    if (await isAuthenticatedPage(page)) return true;
+    if (await isLoginFormVisible(page)) return false;
+    return isAuthenticatedDestinationUrl(currentUrl);
+}
+
 function matchesLoginErrorText(text) {
     const normalized = String(text || '').replace(/\s+/g, ' ').trim();
     if (!normalized) return false;
     if (/site is protected by recaptcha|situs ini dilindungi oleh recaptcha/i.test(normalized)) return false;
     return LOGIN_ERROR_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function isRetryableLoginFailure(error) {
+    const normalized = String(error || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return true;
+    if (/server login duolingo sedang bermasalah|status=5\d\d|timed out|timeout|net::|network|connection|ecconn|econn|socket hang up/i.test(normalized)) {
+        return true;
+    }
+    return !NON_RETRYABLE_LOGIN_ERROR_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function trackAsyncValue(promise) {
@@ -1017,7 +1204,7 @@ function summarizeLoginApiPayload(payload) {
 }
 
 function defaultLoginApiError(status) {
-    if (status === 401) return 'Kata sandi salah. Silakan coba lagi.';
+    if (status === 401) return 'Email/username atau kata sandi salah. Periksa kredensial akun.';
     if (status === 403) return 'Login diblokir atau butuh verifikasi tambahan.';
     if (status === 429) return 'Terlalu banyak percobaan login. Coba lagi nanti.';
     if (status >= 500) return 'Server login Duolingo sedang bermasalah.';
@@ -1046,6 +1233,7 @@ async function parseLoginApiResponse(response) {
             success: true,
             status,
             message,
+            retryable: false,
             debug_body: summarizeLoginApiPayload(payload),
             url: response.url(),
         };
@@ -1055,6 +1243,7 @@ async function parseLoginApiResponse(response) {
         success: false,
         status,
         error: message || defaultLoginApiError(status),
+        retryable: status === 401 || status === 429 || status >= 500,
         debug_body: summarizeLoginApiPayload(payload),
         url: response.url(),
     };
@@ -1099,25 +1288,48 @@ async function waitForLoginResult(page, timeout = 15000, options = {}) {
         if (Date.now() - startedAt >= minNoNavigationWaitMs) return false;
         return page.url() === initialUrl;
     };
+    let loginApiSuccessSeenAt = null;
 
     while (Date.now() < deadline) {
         const loginApiResult = loginApiTracker?.getValue?.() ?? null;
+        if (loginApiResult?.success && loginApiSuccessSeenAt == null) {
+            loginApiSuccessSeenAt = Date.now();
+        }
+        const successSettleElapsed = loginApiSuccessSeenAt == null
+            ? LOGIN_API_SUCCESS_SETTLE_DELAY_MS
+            : (Date.now() - loginApiSuccessSeenAt);
+        const canFinalizeSuccessfulLogin = loginApiSuccessSeenAt == null
+            || successSettleElapsed >= LOGIN_API_SUCCESS_SETTLE_DELAY_MS;
 
-        if (loginApiResult?.success && !await isLoginFormVisible(page)) {
+        if (
+            loginApiResult?.success
+            && canFinalizeSuccessfulLogin
+            && await hasCompletedLoginRedirect(page, initialUrl)
+        ) {
             return { success: true, current_url: page.url() };
         }
 
-        if (await isAuthenticatedPage(page)) {
+        if (canFinalizeSuccessfulLogin && await isAuthenticatedPage(page)) {
             return { success: true, current_url: page.url() };
         }
 
         if (loginApiResult && !loginApiResult.success && !shouldDelayFailureWhilePageIsStuck()) {
-            return { success: false, error: loginApiResult.error, current_url: page.url() };
+            return {
+                success: false,
+                error: loginApiResult.error,
+                current_url: page.url(),
+                retryable: loginApiResult.retryable === true,
+            };
         }
 
         const loginError = await extractLoginError(page);
         if (loginError && !shouldDelayFailureWhilePageIsStuck()) {
-            return { success: false, error: loginError, current_url: page.url() };
+            return {
+                success: false,
+                error: loginError,
+                current_url: page.url(),
+                retryable: true,
+            };
         }
 
         await sleep(250);
@@ -1125,18 +1337,37 @@ async function waitForLoginResult(page, timeout = 15000, options = {}) {
 
     const loginError = await extractLoginError(page);
     if (loginError) {
-        return { success: false, error: loginError, current_url: page.url() };
+        return {
+            success: false,
+            error: loginError,
+            current_url: page.url(),
+            retryable: true,
+        };
     }
 
     const loginApiResult = loginApiTracker?.getValue?.() ?? null;
-    if (loginApiResult?.success && !await isLoginFormVisible(page)) {
+    const successSettleElapsed = loginApiSuccessSeenAt == null
+        ? LOGIN_API_SUCCESS_SETTLE_DELAY_MS
+        : (Date.now() - loginApiSuccessSeenAt);
+    const canFinalizeSuccessfulLogin = loginApiSuccessSeenAt == null
+        || successSettleElapsed >= LOGIN_API_SUCCESS_SETTLE_DELAY_MS;
+    if (
+        loginApiResult?.success
+        && canFinalizeSuccessfulLogin
+        && await hasCompletedLoginRedirect(page, initialUrl)
+    ) {
         return { success: true, current_url: page.url() };
     }
     if (loginApiResult && !loginApiResult.success) {
-        return { success: false, error: loginApiResult.error, current_url: page.url() };
+        return {
+            success: false,
+            error: loginApiResult.error,
+            current_url: page.url(),
+            retryable: loginApiResult.retryable === true,
+        };
     }
 
-    if (await isAuthenticatedPage(page)) {
+    if (canFinalizeSuccessfulLogin && await isAuthenticatedPage(page)) {
         return { success: true, current_url: page.url() };
     }
 
@@ -1147,19 +1378,67 @@ async function waitForLoginResult(page, timeout = 15000, options = {}) {
     };
 }
 
-async function clickTrialCta(page) {
-    const candidates = [
+function sanitizeDebugSegment(value = 'debug') {
+    const normalized = String(value || 'debug')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64);
+    return normalized || 'debug';
+}
+
+function getTrialCtaCandidates(page) {
+    return [
         page.getByRole('button', { name: TRIAL_CTA_TEXT }).first(),
         page.getByRole('link', { name: TRIAL_CTA_TEXT }).first(),
         page.getByText(TRIAL_CTA_TEXT).first(),
     ];
+}
 
-    for (const candidate of candidates) {
-        if (!await candidate.isVisible().catch(() => false)) continue;
-        if (await clickLocator(page, candidate, { timeout: 3000 })) return true;
+async function findVisibleTrialCta(page) {
+    for (const candidate of getTrialCtaCandidates(page)) {
+        if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+    return null;
+}
+
+async function readVisibleText(locator) {
+    if (!await locator.isVisible().catch(() => false)) return null;
+
+    const text = ((await locator.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+    if (text) return text;
+
+    const fallback = [
+        await locator.getAttribute('aria-label').catch(() => ''),
+        await locator.getAttribute('title').catch(() => ''),
+        await locator.getAttribute('value').catch(() => ''),
+    ]
+        .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
+        .find(Boolean);
+
+    return fallback || null;
+}
+
+async function collectVisibleTexts(locator, limit = 8) {
+    const texts = [];
+    const total = await locator.count().catch(() => 0);
+    const scanLimit = Math.min(total, Math.max(limit * 6, limit));
+
+    for (let index = 0; index < scanLimit; index += 1) {
+        const candidate = locator.nth(index);
+        const text = await readVisibleText(candidate);
+        if (!text || texts.includes(text)) continue;
+        texts.push(text);
+        if (texts.length >= limit) break;
     }
 
-    return false;
+    return texts;
+}
+
+async function clickTrialCta(page) {
+    const candidate = await findVisibleTrialCta(page);
+    if (!candidate) return false;
+    return await clickLocator(page, candidate, { timeout: 3000 });
 }
 
 function isLearnScreenUrl(url) {
@@ -1264,6 +1543,82 @@ function getStripeFrames(page) {
     });
 }
 
+async function isStripeFrameVisible(page) {
+    return await page.locator(STRIPE_IFRAME_SELECTOR).first().isVisible().catch(() => false);
+}
+
+async function readStoredCardLast4(page) {
+    const candidate = page.getByText(STORED_CARD_LAST4_PATTERN).first();
+    const text = await readVisibleText(candidate);
+    if (!text) return null;
+
+    const match = text.match(STORED_CARD_LAST4_PATTERN);
+    return match?.[1] || null;
+}
+
+function getPaymentCardLast4(paymentData = {}) {
+    return String(paymentData?.cardNumber || '').replace(/\D+/g, '').slice(-4) || null;
+}
+
+function describePaymentCandidate(paymentData = {}, index = 0, total = 0) {
+    const last4 = getPaymentCardLast4(paymentData) || '----';
+    const label = String(paymentData?.label || '').trim();
+    const prefix = total > 0 ? `${index + 1}/${total} ` : '';
+    return `${prefix}${label ? `${label} ` : ''}****${last4}`.trim();
+}
+
+function findFirstDifferentPaymentCandidateIndex(candidates = [], last4 = null, fallbackIndex = 0) {
+    if (!last4) return fallbackIndex;
+    const index = candidates.findIndex((candidate) => getPaymentCardLast4(candidate) !== last4);
+    return index >= 0 ? index : fallbackIndex;
+}
+
+function isRetryablePaymentError(error = '') {
+    const text = String(error || '').trim();
+    return Boolean(text) && RETRYABLE_PAYMENT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function shouldHoldTrialFailureBrowser(config = {}, effectiveLoginHeadless, afterLoginResult = null) {
+    const holdSeconds = Number(config?.trial_failure_hold_seconds ?? 0);
+    return effectiveLoginHeadless !== true
+        && holdSeconds > 0
+        && String(afterLoginResult?.action || '').trim().toLowerCase() === 'trial-auto-vcc'
+        && String(afterLoginResult?.status || '').trim().toLowerCase() === 'failed';
+}
+
+async function resolveTrialPaymentCandidates(config = {}) {
+    const fallbackPool = Array.isArray(config?.vccPool) && config.vccPool.length > 0
+        ? config.vccPool
+        : await loadVccEntries().catch(() => []);
+
+    return normalizeTrialPaymentCandidates(config?.vccData, fallbackPool);
+}
+
+async function readTrialEntryState(page, { includeTextSamples = false } = {}) {
+    const state = {
+        url: page.url(),
+        title: await page.title().catch(() => ''),
+        trial_cta_visible: Boolean(await findVisibleTrialCta(page)),
+        plus_continue_visible: await page.locator(PLUS_CONTINUE_SELECTOR).first().isVisible().catch(() => false),
+        trial_plan_visible: await page.locator(TRIAL_PLAN_SELECTOR).first().isVisible().catch(() => false),
+        stripe_frame_visible: await isStripeFrameVisible(page),
+        stored_card_submit_visible: await page.locator(STORED_CARD_SUBMIT_SELECTOR).first().isVisible().catch(() => false),
+        stored_card_use_another_visible: await page.locator(STORED_CARD_USE_ANOTHER_SELECTOR).first().isVisible().catch(() => false),
+        stored_card_last4: await readStoredCardLast4(page),
+    };
+
+    if (!includeTextSamples) {
+        return state;
+    }
+
+    return {
+        ...state,
+        heading_texts: await collectVisibleTexts(page.locator('h1, h2, h3, [role="heading"]'), 8),
+        button_texts: await collectVisibleTexts(page.locator('button, [role="button"]'), 12),
+        link_texts: await collectVisibleTexts(page.locator('a'), 8),
+    };
+}
+
 async function findVisiblePaymentField(page, selectors, timeout = 10000) {
     const query = Array.isArray(selectors) ? selectors.join(', ') : selectors;
     const deadline = Date.now() + timeout;
@@ -1307,8 +1662,455 @@ async function fillPaymentField(page, { selectors, value, label, timeout = 12000
     return field;
 }
 
+async function waitForEnabledPaymentSubmitButton(page, timeout = 10000) {
+    const deadline = Date.now() + timeout;
+
+    while (Date.now() < deadline) {
+        const button = page.locator(`${STORED_CARD_SUBMIT_SELECTOR}:not([disabled])`).first();
+        if (await button.isVisible().catch(() => false)) {
+            return button;
+        }
+
+        const paymentError = await extractPaymentError(page);
+        if (paymentError) return null;
+
+        await sleep(250);
+    }
+
+    return null;
+}
+
+async function matchVisibleText(context, patterns = []) {
+    for (const pattern of patterns) {
+        const candidate = context.getByText(pattern).first();
+        if (!await candidate.isVisible().catch(() => false)) continue;
+        const text = ((await candidate.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+        if (text) return text;
+    }
+    return null;
+}
+
+async function extractPaymentError(page) {
+    const contexts = [page, ...getStripeFrames(page)];
+    for (const context of contexts) {
+        const matchedText = await matchVisibleText(context, PAYMENT_ERROR_TEXT_PATTERNS);
+        if (matchedText) return matchedText;
+
+        const selectors = [
+            '[role="alert"]',
+            '[aria-live="assertive"]',
+            '[data-test*="error"]',
+            '.Error',
+            '.error',
+            '[class*="Error"]',
+            '[class*="error"]',
+        ];
+
+        for (const selector of selectors) {
+            const candidate = context.locator(selector).first();
+            if (!await candidate.isVisible().catch(() => false)) continue;
+            const text = ((await candidate.textContent().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+            if (!text) continue;
+            if (PAYMENT_ERROR_TEXT_PATTERNS.some((pattern) => pattern.test(text))) {
+                return text;
+            }
+        }
+    }
+
+    return null;
+}
+
+async function detectTrialActivation(page) {
+    const matchedText = await matchVisibleText(page, TRIAL_ACTIVE_TEXT_PATTERNS);
+    if (matchedText) return matchedText;
+
+    const ctaVisible = Boolean(await findVisibleTrialCta(page));
+    if (ctaVisible) return null;
+
+    const stripeVisible = await isStripeFrameVisible(page);
+    if (stripeVisible) return null;
+
+    return null;
+}
+
+async function saveTrialDebugBundle(page, reason, logStep = () => { }, extra = {}) {
+    try {
+        const debugDir = resolveDebugDir();
+        mkdirSync(debugDir, { recursive: true });
+
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const safeReason = sanitizeDebugSegment(reason);
+        const basePath = join(debugDir, `trial-debug-${safeReason}-${stamp}`);
+        const state = await readTrialEntryState(page, { includeTextSamples: true });
+        const activationText = await detectTrialActivation(page);
+        const paymentError = await extractPaymentError(page);
+
+        writeFileSync(`${basePath}.json`, JSON.stringify({
+            captured_at: new Date().toISOString(),
+            reason,
+            ...extra,
+            state: {
+                ...state,
+                activation_text: activationText,
+                payment_error: paymentError,
+            },
+        }, null, 2), 'utf8');
+        writeFileSync(`${basePath}.html`, await page.content(), 'utf8');
+        await page.screenshot({ path: `${basePath}.png`, fullPage: true }).catch(() => { });
+
+        logStep(`[AFTER][DEBUG] saved ${basePath}.png | ${basePath}.html | ${basePath}.json`);
+    } catch (error) {
+        logStep(`[AFTER][DEBUG] gagal simpan bundle ${reason}: ${error.message}`);
+    }
+}
+
+async function fillAndSubmitTrialPayment(page, paymentData, config, logStep = () => { }) {
+    logStep(`[AFTER] form pembayaran siap | coba kartu ${describePaymentCandidate(paymentData)}`);
+
+    try {
+        await fillPaymentField(page, {
+            selectors: [
+                'input[name="cardnumber"]',
+                'input[autocomplete="cc-number"]',
+                'input[data-elements-stable-field-name="cardNumber"]',
+            ],
+            value: paymentData.cardNumber,
+            label: 'nomor kartu',
+        });
+
+        await fillPaymentField(page, {
+            selectors: [
+                'input[name="exp-date"]',
+                'input[autocomplete="cc-exp"]',
+                'input[data-elements-stable-field-name="cardExpiry"]',
+            ],
+            value: paymentData.expDate,
+            label: 'expired date',
+        });
+
+        const cvcInput = await fillPaymentField(page, {
+            selectors: [
+                'input[name="cvc"]',
+                'input[autocomplete="cc-csc"]',
+                'input[data-elements-stable-field-name="cardCvc"]',
+            ],
+            value: paymentData.cvc,
+            label: 'CVC',
+        });
+
+        if (paymentData.cardholderName) {
+            const nameInput = await fillPaymentField(page, {
+                selectors: [
+                    'input[name="name"]',
+                    'input[name="cardholderName"]',
+                    'input[autocomplete="cc-name"]',
+                    'input[data-elements-stable-field-name="cardholderName"]',
+                ],
+                value: paymentData.cardholderName,
+                label: 'nama kartu',
+                required: false,
+            });
+            if (!nameInput) {
+                logStep('[AFTER] field nama kartu tidak tersedia, skip');
+            }
+        }
+
+        let submitSource = cvcInput;
+        if (paymentData.postalCode) {
+            const postalInput = await fillPaymentField(page, {
+                selectors: [
+                    'input[name="postalCode"]',
+                    'input[name="billingPostalCode"]',
+                    'input[autocomplete="postal-code"]',
+                    'input[data-elements-stable-field-name="postalCode"]',
+                ],
+                value: paymentData.postalCode,
+                label: 'kode pos billing',
+                required: false,
+            });
+            if (postalInput) {
+                submitSource = postalInput;
+            } else {
+                logStep('[AFTER] field kode pos billing tidak tersedia, skip');
+            }
+        }
+
+        const submitButton = await waitForEnabledPaymentSubmitButton(page, 8000);
+        if (submitButton) {
+            logStep('[AFTER] input pembayaran selesai | tombol submit aktif, klik tombol');
+            await clickLocator(page, submitButton, { timeout: 4000 }).catch(() => { });
+        } else {
+            logStep('[AFTER] input pembayaran selesai | tombol submit belum aktif, fallback Enter');
+            await submitSource.press('Enter').catch(() => { });
+        }
+
+        logStep('[AFTER] menunggu hasil submit pembayaran...');
+        const submitOutcome = await resolveTrialSubmitOutcome(
+            page,
+            Math.max(12000, Math.min(Number(config?.timeout || 0), 25000)),
+            logStep,
+        );
+
+        return {
+            ...submitOutcome,
+            card_last4: getPaymentCardLast4(paymentData),
+            retryable: submitOutcome?.status === 'failed'
+                && isRetryablePaymentError(submitOutcome?.error)
+                && await isStripeFrameVisible(page),
+        };
+    } catch (error) {
+        logStep(`[AFTER] error saat input pembayaran: ${error.message}`);
+        return {
+            status: 'failed',
+            error: error.message,
+            current_url: page.url(),
+            card_last4: getPaymentCardLast4(paymentData),
+            retryable: false,
+        };
+    }
+}
+
+async function submitTrialPaymentCandidates(page, paymentCandidates, { startIndex = 0, config, logStep = () => { } } = {}) {
+    if (!Array.isArray(paymentCandidates) || paymentCandidates.length === 0) {
+        return {
+            status: 'no-vcc-data',
+            current_url: page.url(),
+            retryable: false,
+        };
+    }
+
+    let lastOutcome = {
+        status: 'failed',
+        error: 'Tidak ada kandidat kartu yang bisa dipakai',
+        current_url: page.url(),
+        retryable: false,
+    };
+
+    for (let index = Math.max(0, startIndex); index < paymentCandidates.length; index += 1) {
+        const candidate = paymentCandidates[index];
+        logStep(`[AFTER] kandidat pembayaran ${describePaymentCandidate(candidate, index, paymentCandidates.length)}`);
+
+        const outcome = await fillAndSubmitTrialPayment(page, candidate, config, logStep);
+        lastOutcome = outcome;
+
+        if (outcome?.status === 'claimed') {
+            return outcome;
+        }
+
+        if (!(outcome?.retryable === true && index < paymentCandidates.length - 1)) {
+            return outcome;
+        }
+
+        logStep(`[AFTER] kartu ****${outcome.card_last4 || '----'} ditolak | coba kartu berikutnya`);
+        await sleep(600);
+    }
+
+    return lastOutcome;
+}
+
+async function holdTrialFailureBrowserOpen(context, config = {}, logStep = () => { }) {
+    const holdSeconds = Math.max(1, Number(config?.trial_failure_hold_seconds ?? 0));
+    logStep(`[AFTER] trial gagal | tahan browser ${holdSeconds} detik untuk inspeksi manual`);
+
+    const contextClosed = new Promise((resolve) => {
+        try {
+            context.once('close', () => resolve('closed'));
+        } catch {
+            resolve('closed');
+        }
+    });
+    const timeoutReached = sleep(holdSeconds * 1000).then(() => 'timeout');
+    const result = await Promise.race([contextClosed, timeoutReached]).catch(() => 'timeout');
+
+    if (result === 'closed') {
+        logStep('[AFTER] browser ditutup manual saat inspeksi');
+        return false;
+    }
+
+    logStep('[AFTER] inspeksi selesai | tutup browser otomatis');
+    return true;
+}
+
+async function resolveTrialSubmitOutcome(page, timeout = 15000, logStep = () => { }) {
+    const deadline = Date.now() + timeout;
+
+    while (Date.now() < deadline) {
+        const paymentError = await extractPaymentError(page);
+        if (paymentError) {
+            logStep(`[AFTER] error pembayaran terdeteksi | ${paymentError}`);
+            return {
+                status: 'failed',
+                error: paymentError,
+                current_url: page.url(),
+            };
+        }
+
+        const activationText = await detectTrialActivation(page);
+        if (activationText) {
+            logStep(`[AFTER] trial aktif terdeteksi | ${activationText}`);
+            return {
+                status: 'claimed',
+                current_url: page.url(),
+            };
+        }
+
+        await sleep(500);
+    }
+
+    const paymentError = await extractPaymentError(page);
+    if (paymentError) {
+        logStep(`[AFTER] error pembayaran terdeteksi setelah tunggu | ${paymentError}`);
+        return {
+            status: 'failed',
+            error: paymentError,
+            current_url: page.url(),
+        };
+    }
+
+    const activationText = await detectTrialActivation(page);
+    if (activationText) {
+        logStep(`[AFTER] trial aktif terdeteksi setelah tunggu | ${activationText}`);
+        return {
+            status: 'claimed',
+            current_url: page.url(),
+        };
+    }
+
+    if (await isStripeFrameVisible(page)) {
+        return {
+            status: 'failed',
+            error: 'Form pembayaran masih terbuka setelah submit',
+            current_url: page.url(),
+        };
+    }
+
+    return {
+        status: 'failed',
+        error: 'Submit pembayaran terkirim, tetapi trial tidak terverifikasi aktif',
+        current_url: page.url(),
+    };
+}
+
+function normalizeFamilyInviteLink(value) {
+    const text = String(value || '').trim().replace(/^["']|["']$/g, '');
+    if (!/^https?:\/\//i.test(text)) return null;
+    return text;
+}
+
+async function extractFamilyInviteLink(page) {
+    const clipboardText = await page.evaluate(async () => {
+        if (!navigator?.clipboard?.readText) return '';
+        try {
+            return await navigator.clipboard.readText();
+        } catch {
+            return '';
+        }
+    }).catch(() => '');
+    const normalizedClipboardLink = normalizeFamilyInviteLink(clipboardText);
+    if (normalizedClipboardLink) return normalizedClipboardLink;
+
+    const domLink = await page.evaluate(() => {
+        const candidates = [];
+        const elements = Array.from(document.querySelectorAll('input, textarea, a[href], [role="textbox"], [data-test*="link"]'));
+        for (const element of elements) {
+            const value = 'value' in element ? String(element.value || '') : '';
+            const href = 'href' in element ? String(element.href || '') : '';
+            const text = String(element.textContent || '');
+            candidates.push(value, href, text);
+        }
+
+        return candidates.find((candidate) => /^https?:\/\//i.test(String(candidate || '').trim())) || '';
+    }).catch(() => '');
+
+    return normalizeFamilyInviteLink(domLink);
+}
+
+async function collectFamilyInviteLink(page, logStep = () => { }) {
+    logStep('[AFTER] mulai ambil link invite family');
+
+    if (isLearnScreenUrl(page.url())) {
+        logStep(`[AFTER] layar belajar terdeteksi | coba klik X kiri atas | url=${page.url()}`);
+        const exitedLearnScreen = await exitLearnScreenToDashboard(page, 12000);
+        logStep(`[AFTER] keluar dari layar belajar | ${exitedLearnScreen ? 'ok' : 'skip'} | url=${page.url()}`);
+    }
+
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: 'https://www.duolingo.com',
+    }).catch(() => { });
+
+    await dismissCookieBanner(page, 2500).catch(() => { });
+
+    const homeLink = page.locator(FAMILY_HOME_SELECTOR).getByRole('link').first();
+    const clickedHome = await clickLocator(page, homeLink, { timeout: 5000 })
+        .catch(async () => await safeClick(page, `${FAMILY_HOME_SELECTOR} a`, 4000));
+    logStep(`[AFTER] buka menu home | ${clickedHome ? 'ok' : 'skip'}`);
+    await sleep(600);
+
+    let addMemberClicked = false;
+    for (const pattern of FAMILY_ADD_MEMBER_PATTERNS) {
+        const button = page.getByRole('button', { name: pattern }).first();
+        if (!await button.isVisible().catch(() => false)) continue;
+        addMemberClicked = await clickLocator(page, button, { timeout: 5000 });
+        if (addMemberClicked) break;
+    }
+
+    if (!addMemberClicked) {
+        return {
+            action: 'family-invite-link',
+            status: 'failed',
+            error: 'Tombol Add member tidak ditemukan',
+            current_url: page.url(),
+        };
+    }
+
+    logStep('[AFTER] tombol Add member berhasil diklik');
+    await sleep(900);
+
+    let copyClicked = false;
+    for (const pattern of FAMILY_COPY_BUTTON_PATTERNS) {
+        const button = page.getByRole('button', { name: pattern }).first();
+        if (!await button.isVisible().catch(() => false)) continue;
+        copyClicked = await clickLocator(page, button, { timeout: 5000 });
+        if (copyClicked) break;
+    }
+
+    if (!copyClicked) {
+        return {
+            action: 'family-invite-link',
+            status: 'failed',
+            error: 'Tombol COPY tidak ditemukan',
+            current_url: page.url(),
+        };
+    }
+
+    logStep('[AFTER] tombol COPY berhasil diklik');
+    await sleep(500);
+
+    const inviteLink = await extractFamilyInviteLink(page);
+    if (!inviteLink) {
+        return {
+            action: 'family-invite-link',
+            status: 'failed',
+            error: 'Link invite family tidak berhasil dibaca',
+            current_url: page.url(),
+        };
+    }
+
+    logStep(`[AFTER] link invite family berhasil diambil | ${inviteLink}`);
+    return {
+        action: 'family-invite-link',
+        status: 'collected',
+        current_url: page.url(),
+        invite_link: inviteLink,
+    };
+}
+
 async function runAfterLoginAction(page, config, logStep) {
     const action = String(config?.after_login_action || 'none').trim().toLowerCase();
+    if (action === 'family-invite-link') {
+        return await collectFamilyInviteLink(page, logStep);
+    }
+
     if (action !== 'trial-manual' && action !== 'trial-auto-vcc') {
         return {
             action,
@@ -1337,8 +2139,10 @@ async function runAfterLoginAction(page, config, logStep) {
     ];
 
     let ctaOpened = false;
+    const trialEntryAttempts = [];
     for (const candidateUrl of candidateUrls) {
         if (candidateUrl && candidateUrl !== page.url()) {
+            logStep(`[AFTER] buka kandidat trial | url=${candidateUrl}`);
             await gotoWithRetry(page, candidateUrl, {
                 maxTry: 2,
                 timeout: Math.max(45000, Number(config?.timeout || 0)),
@@ -1347,13 +2151,31 @@ async function runAfterLoginAction(page, config, logStep) {
             await sleep(300);
         }
 
+        const entryState = await readTrialEntryState(page);
+        trialEntryAttempts.push({
+            candidate_url: candidateUrl,
+            page_url: entryState.url,
+            title: entryState.title,
+            trial_cta_visible: entryState.trial_cta_visible,
+            plus_continue_visible: entryState.plus_continue_visible,
+            trial_plan_visible: entryState.trial_plan_visible,
+            stripe_frame_visible: entryState.stripe_frame_visible,
+        });
+        logStep(
+            `[AFTER] state trial | url=${entryState.url} | cta=${entryState.trial_cta_visible ? 'yes' : 'no'} | continue=${entryState.plus_continue_visible ? 'yes' : 'no'} | plan=${entryState.trial_plan_visible ? 'yes' : 'no'} | stripe=${entryState.stripe_frame_visible ? 'yes' : 'no'}`,
+        );
+
         if (await clickTrialCta(page)) {
             ctaOpened = true;
+            logStep(`[AFTER] CTA trial berhasil diklik | url=${page.url()}`);
             break;
         }
     }
 
     if (!ctaOpened) {
+        await saveTrialDebugBundle(page, 'trial-cta-not-found', logStep, {
+            attempts: trialEntryAttempts,
+        });
         return {
             action,
             status: 'failed',
@@ -1363,13 +2185,18 @@ async function runAfterLoginAction(page, config, logStep) {
     }
 
     await sleep(500);
-    await clickPlusContinue(page, 5000).catch(() => false);
+    const continueClickedFirst = await clickPlusContinue(page, 5000).catch(() => false);
+    logStep(`[AFTER] klik continue trial #1 | ${continueClickedFirst ? 'ok' : 'skip'}`);
     await sleep(350);
-    await clickPlusContinue(page, 5000).catch(() => false);
+    const continueClickedSecond = await clickPlusContinue(page, 5000).catch(() => false);
+    logStep(`[AFTER] klik continue trial #2 | ${continueClickedSecond ? 'ok' : 'skip'}`);
     await sleep(350);
 
     const planSelected = await chooseTrialPlan(page, 12000);
     if (!planSelected) {
+        await saveTrialDebugBundle(page, 'trial-plan-not-found', logStep, {
+            attempts: trialEntryAttempts,
+        });
         return {
             action,
             status: 'failed',
@@ -1377,97 +2204,131 @@ async function runAfterLoginAction(page, config, logStep) {
             current_url: page.url(),
         };
     }
+    logStep(`[AFTER] paket trial berhasil dipilih | url=${page.url()}`);
 
     await sleep(350);
-    await clickPlusContinue(page, 6000).catch(() => false);
+    const continueClickedThird = await clickPlusContinue(page, 6000).catch(() => false);
+    logStep(`[AFTER] klik continue trial #3 | ${continueClickedThird ? 'ok' : 'skip'}`);
 
-    const stripeReady = await waitForStripeFrame(page, Math.max(20000, Number(config?.timeout || 0)));
+    const paymentCandidates = await resolveTrialPaymentCandidates(config);
+    const paymentData = paymentCandidates[0] || normalizeTrialPaymentData(config?.vccData);
+    let paymentCandidateStartIndex = 0;
+    const stripeWaitTimeout = Math.max(20000, Number(config?.timeout || 0));
+    let stripeReady = await waitForStripeFrame(page, stripeWaitTimeout);
+
     if (!stripeReady) {
+        const storedCardSubmitButton = page.locator(STORED_CARD_SUBMIT_SELECTOR).first();
+        const storedCardSubmitVisible = await storedCardSubmitButton.isVisible().catch(() => false);
+        const storedCardLast4 = await readStoredCardLast4(page);
+        const requestedCardLast4 = paymentData?.cardNumber ? String(paymentData.cardNumber).slice(-4) : null;
+        const useAnotherCardButton = page.locator(STORED_CARD_USE_ANOTHER_SELECTOR).first();
+        const useAnotherCardVisible = await useAnotherCardButton.isVisible().catch(() => false);
+
+        if (storedCardSubmitVisible) {
+            logStep(
+                `[AFTER] checkout kartu tersimpan terdeteksi | stored=${storedCardLast4 || '-'} | requested=${requestedCardLast4 || '-'} | use-another=${useAnotherCardVisible ? 'yes' : 'no'}`,
+            );
+
+            if (requestedCardLast4 && storedCardLast4 && requestedCardLast4 !== storedCardLast4 && useAnotherCardVisible) {
+                const switchedCard = await clickLocator(page, useAnotherCardButton, { timeout: 5000 });
+                logStep(`[AFTER] pilih kartu lain | ${switchedCard ? 'ok' : 'skip'}`);
+                if (switchedCard) {
+                    await sleep(400);
+                    stripeReady = await waitForStripeFrame(page, Math.max(12000, stripeWaitTimeout / 2));
+                }
+            } else {
+                const submittedStoredCard = await clickLocator(page, storedCardSubmitButton, { timeout: 5000 });
+                logStep(`[AFTER] submit trial dengan kartu tersimpan | ${submittedStoredCard ? 'ok' : 'skip'}`);
+                if (submittedStoredCard) {
+                    await sleep(1200);
+                    if (await isStripeFrameVisible(page)) {
+                        logStep('[AFTER] submit kartu tersimpan memunculkan form Stripe | fallback isi kartu');
+                        stripeReady = true;
+                        paymentCandidateStartIndex = findFirstDifferentPaymentCandidateIndex(paymentCandidates, storedCardLast4, 0);
+                    }
+                }
+
+                if (submittedStoredCard && !stripeReady) {
+                    const submitOutcome = await resolveTrialSubmitOutcome(
+                        page,
+                        Math.max(12000, Math.min(Number(config?.timeout || 0), 25000)),
+                        logStep,
+                    );
+                    const useAnotherCardVisibleAfterSubmit = await useAnotherCardButton.isVisible().catch(() => false);
+                    if (
+                        submitOutcome?.status === 'failed'
+                        && isRetryablePaymentError(submitOutcome?.error)
+                        && useAnotherCardVisibleAfterSubmit
+                    ) {
+                        const switchedCard = await clickLocator(page, useAnotherCardButton, { timeout: 5000 });
+                        logStep(`[AFTER] kartu tersimpan ditolak | pilih kartu lain ${switchedCard ? 'ok' : 'skip'}`);
+                        if (switchedCard) {
+                            await sleep(400);
+                            stripeReady = await waitForStripeFrame(page, Math.max(12000, stripeWaitTimeout / 2));
+                            if (stripeReady) {
+                                paymentCandidateStartIndex = findFirstDifferentPaymentCandidateIndex(paymentCandidates, storedCardLast4, 0);
+                            }
+                        }
+                    }
+
+                    if (submitOutcome?.status === 'failed' && !stripeReady && await isStripeFrameVisible(page)) {
+                        logStep(`[AFTER] validasi kartu tersimpan butuh input ulang (${submitOutcome.error || '-'}) | fallback isi form Stripe`);
+                        stripeReady = true;
+                        paymentCandidateStartIndex = findFirstDifferentPaymentCandidateIndex(paymentCandidates, storedCardLast4, 0);
+                    }
+
+                    if (submitOutcome?.status === 'claimed') {
+                        return { action, ...submitOutcome };
+                    }
+
+                    if (submitOutcome?.status === 'failed' && !stripeReady) {
+                        if (submitOutcome?.status === 'failed') {
+                            await saveTrialDebugBundle(page, 'trial-stored-card-submit-failed', logStep, {
+                                attempts: trialEntryAttempts,
+                                stored_card_last4: storedCardLast4,
+                                submit_error: submitOutcome.error || null,
+                            });
+                        }
+                        return { action, ...submitOutcome };
+                    }
+                }
+
+                if (submittedStoredCard && stripeReady) {
+                    logStep('[AFTER] lanjut pakai form Stripe setelah submit kartu tersimpan');
+                }
+
+                if (submittedStoredCard && !stripeReady) {
+                    await saveTrialDebugBundle(page, 'trial-payment-form-not-found', logStep, {
+                        attempts: trialEntryAttempts,
+                    });
+                    return { action, status: 'failed', error: 'Form pembayaran belum muncul', current_url: page.url() };
+                }
+            }
+        }
+    }
+
+    if (!stripeReady) {
+        await saveTrialDebugBundle(page, 'trial-payment-form-not-found', logStep, {
+            attempts: trialEntryAttempts,
+        });
         return { action, status: 'failed', error: 'Form pembayaran belum muncul', current_url: page.url() };
     }
 
-    const paymentData = normalizeTrialPaymentData(config?.vccData);
     if (action === 'trial-auto-vcc' && paymentData) {
-        logStep('[AFTER] form pembayaran siap | memproses input data pembayaran otomatis...');
-        try {
-            await fillPaymentField(page, {
-                selectors: [
-                    'input[name="cardnumber"]',
-                    'input[autocomplete="cc-number"]',
-                    'input[data-elements-stable-field-name="cardNumber"]',
-                ],
-                value: paymentData.cardNumber,
-                label: 'nomor kartu',
+        const submitOutcome = await submitTrialPaymentCandidates(page, paymentCandidates, {
+            startIndex: paymentCandidateStartIndex,
+            config,
+            logStep,
+        });
+        if (submitOutcome?.status === 'failed') {
+            await saveTrialDebugBundle(page, 'trial-submit-failed', logStep, {
+                attempts: trialEntryAttempts,
+                submit_error: submitOutcome.error || null,
+                card_last4: submitOutcome.card_last4 || null,
             });
-
-            await fillPaymentField(page, {
-                selectors: [
-                    'input[name="exp-date"]',
-                    'input[autocomplete="cc-exp"]',
-                    'input[data-elements-stable-field-name="cardExpiry"]',
-                ],
-                value: paymentData.expDate,
-                label: 'expired date',
-            });
-
-            const cvcInput = await fillPaymentField(page, {
-                selectors: [
-                    'input[name="cvc"]',
-                    'input[autocomplete="cc-csc"]',
-                    'input[data-elements-stable-field-name="cardCvc"]',
-                ],
-                value: paymentData.cvc,
-                label: 'CVC',
-            });
-
-            if (paymentData.cardholderName) {
-                const nameInput = await fillPaymentField(page, {
-                    selectors: [
-                        'input[name="name"]',
-                        'input[name="cardholderName"]',
-                        'input[autocomplete="cc-name"]',
-                        'input[data-elements-stable-field-name="cardholderName"]',
-                    ],
-                    value: paymentData.cardholderName,
-                    label: 'nama kartu',
-                    required: false,
-                });
-                if (!nameInput) {
-                    logStep('[AFTER] field nama kartu tidak tersedia, skip');
-                }
-            }
-
-            let submitSource = cvcInput;
-            if (paymentData.postalCode) {
-                const postalInput = await fillPaymentField(page, {
-                    selectors: [
-                        'input[name="postalCode"]',
-                        'input[name="billingPostalCode"]',
-                        'input[autocomplete="postal-code"]',
-                        'input[data-elements-stable-field-name="postalCode"]',
-                    ],
-                    value: paymentData.postalCode,
-                    label: 'kode pos billing',
-                    required: false,
-                });
-                if (postalInput) {
-                    submitSource = postalInput;
-                } else {
-                    logStep('[AFTER] field kode pos billing tidak tersedia, skip');
-                }
-            }
-
-            logStep('[AFTER] input pembayaran selesai | kirim Enter untuk submit');
-            await submitSource.press('Enter').catch(() => { });
-
-            logStep('[AFTER] menunggu respons Stripe (10 detik)...');
-            await sleep(10000);
-
-            return { action, status: 'vcc-injected-success', current_url: page.url() };
-        } catch (error) {
-            logStep(`[AFTER] error saat input pembayaran: ${error.message}`);
-            return { action, status: 'vcc-inject-failed', error: error.message, current_url: page.url() };
         }
+
+        return { action, ...submitOutcome };
     }
 
     return { action, status: 'no-vcc-data', current_url: page.url() };
@@ -1683,16 +2544,12 @@ export async function registerDuolingo(email, config) {
     let context;
 
     try {
-        const launchOptions = {
+        const { launchOptions, browserSelection } = buildLaunchOptions({
+            browser: config.browser,
             headless: config.headless,
             slowMo: config.slow_mo,
-            viewport: { width: 1280, height: 800 },
-            locale: 'id-ID',
-        };
-
-        if (proxy) {
-            launchOptions.proxy = proxy;
-        }
+            proxy,
+        });
 
         await ensureVirtualDisplay({
             headless: launchOptions.headless,
@@ -1701,10 +2558,7 @@ export async function registerDuolingo(email, config) {
 
         mkdirSync(profileDir, { recursive: true });
         context = await chromium.launchPersistentContext(profileDir, launchOptions);
-
-        if (showPointer) {
-            await context.addInitScript(mountPointerOverlayScript);
-        }
+        await installContextScripts(context, { showPointer });
 
         const existingPages = context.pages().filter((candidate) => !candidate.isClosed());
         if (existingPages.length > 0) {
@@ -1721,7 +2575,7 @@ export async function registerDuolingo(email, config) {
         const ensure = (ok, detail) => {
             if (!ok) throw new Error(detail);
         };
-        logStep(`[BROWSER] chromium persistent | profile=${profileDir}`);
+        logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir}`);
 
         if (proxy) {
             await runStep('Validasi proxy', async () => {
@@ -1983,7 +2837,7 @@ export async function registerDuolingo(email, config) {
 
 export async function loginDuolingo(account, config) {
     const email = String(account?.email || '').trim();
-    const password = String(account?.password || config?.password || '').trim();
+    const password = String(account?.password ?? config?.password ?? '');
     const username = String(account?.username || email.split('@')[0] || '').trim() || null;
     const proxy = normalizeProxyConfig(config?.proxy);
     const debugSteps = config?.debug_steps !== false;
@@ -2055,16 +2909,12 @@ export async function loginDuolingo(account, config) {
     }
 
     try {
-        const launchOptions = {
+        const { launchOptions, browserSelection } = buildLaunchOptions({
+            browser: config.browser,
             headless: effectiveLoginHeadless,
             slowMo: config.slow_mo,
-            viewport: { width: 1280, height: 800 },
-            locale: 'id-ID',
-        };
-
-        if (proxy) {
-            launchOptions.proxy = proxy;
-        }
+            proxy,
+        });
 
         await ensureVirtualDisplay({
             headless: launchOptions.headless,
@@ -2073,10 +2923,7 @@ export async function loginDuolingo(account, config) {
 
         mkdirSync(profileDir, { recursive: true });
         context = await chromium.launchPersistentContext(profileDir, launchOptions);
-
-        if (showPointer) {
-            await context.addInitScript(mountPointerOverlayScript);
-        }
+        await installContextScripts(context, { showPointer });
 
         const attachAttemptPage = async (nextPage) => {
             page = nextPage;
@@ -2132,7 +2979,7 @@ export async function loginDuolingo(account, config) {
         const ensure = (ok, detail) => {
             if (!ok) throw new Error(detail);
         };
-        logStep(`[BROWSER] chromium persistent | profile=${profileDir} | headless=${effectiveLoginHeadless}`);
+        logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir} | headless=${effectiveLoginHeadless}`);
         if (config?.force_headed_login === true && config?.headless === true) {
             logStep('[BROWSER] login dipaksa headed walau config headless aktif');
         }
@@ -2292,10 +3139,18 @@ export async function loginDuolingo(account, config) {
                     if (config?.after_login_action && String(config.after_login_action).trim().toLowerCase() !== 'none') {
                         afterLoginResult = await runAfterLoginAction(page, config, logStep);
                     }
-                    await context.close();
-                    const normalizedTrialStatus = afterLoginResult?.status === 'vcc-injected-success'
-                        ? 'submitted'
-                        : null;
+                    let shouldCloseContext = true;
+                    if (afterLoginResult && shouldHoldTrialFailureBrowser(config, effectiveLoginHeadless, afterLoginResult)) {
+                        shouldCloseContext = await holdTrialFailureBrowserOpen(context, config, logStep);
+                    }
+                    if (shouldCloseContext) {
+                        await context.close();
+                    }
+                    const normalizedTrialStatus = afterLoginResult?.status === 'claimed'
+                        ? 'claimed'
+                        : afterLoginResult?.status === 'failed'
+                            ? 'failed'
+                            : null;
                     return {
                         success: true,
                         email,
@@ -2307,6 +3162,7 @@ export async function loginDuolingo(account, config) {
                         after_login_status: afterLoginResult?.status || 'skipped',
                         after_login_error: afterLoginResult?.error || null,
                         after_login_url: afterLoginResult?.current_url || loginResult.current_url,
+                        family_invite_link: afterLoginResult?.invite_link || null,
                         trial_status: normalizedTrialStatus,
                     };
                 }
@@ -2314,6 +3170,7 @@ export async function loginDuolingo(account, config) {
                 lastFailure = {
                     error: loginResult.error || `Masih di: ${loginResult.current_url || page?.url?.() || '-'}`,
                     current_url: loginResult.current_url,
+                    retryable: loginResult.retryable,
                 };
             } catch (error) {
                 lastFailure = {
@@ -2322,10 +3179,18 @@ export async function loginDuolingo(account, config) {
                 };
             }
 
-            if (attemptIndex < maxLoginAttempts) {
+            const shouldRetry = typeof lastFailure?.retryable === 'boolean'
+                ? lastFailure.retryable
+                : isRetryableLoginFailure(lastFailure?.error);
+
+            if (attemptIndex < maxLoginAttempts && shouldRetry) {
                 logStep(`[RETRY] gagal: ${lastFailure?.error || '-'} | siapkan percobaan ulang`);
                 await sleep(350);
                 continue;
+            }
+
+            if (attemptIndex < maxLoginAttempts) {
+                logStep(`[RETRY] stop: ${lastFailure?.error || '-'} | error final, tidak buka tab baru`);
             }
 
             break;
@@ -2340,7 +3205,7 @@ export async function loginDuolingo(account, config) {
             password,
             error: lastFailure?.error || 'Login gagal',
             current_url: lastFailure?.current_url || null,
-            attempt_count: Number.isFinite(maxLoginAttempts) ? maxLoginAttempts : attemptIndex,
+            attempt_count: attemptIndex,
         };
     } catch (err) {
         if (context) await context.close().catch(() => { });

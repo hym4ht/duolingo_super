@@ -2,7 +2,7 @@ import pLimit from 'p-limit';
 import { normalizeLoginAccount } from './account-session.js';
 import { loginDuolingo } from './duolingo.js';
 import { normalizeRuntimeConfig } from './runtime-config.js';
-import { loadSignInAccounts, updateSignInAccountLoginResult } from './storage.js';
+import { loadSignInAccounts, saveFamilyLink, updateSignInAccountLoginResult } from './storage.js';
 
 function emitLog(onLog, message) {
     if (typeof onLog === 'function') onLog(message);
@@ -29,6 +29,13 @@ async function loginSingleAccount({ account, config, onLog, index, total }) {
         onLog: (line) => emitLog(onLog, line),
     });
     await updateSignInAccountLoginResult(credentials.email, result).catch(() => { });
+    if (result?.family_invite_link) {
+        await saveFamilyLink({
+            email: credentials.email,
+            username: credentials.username,
+            invite_link: result.family_invite_link,
+        }).catch(() => { });
+    }
 
     if (result.success) {
         emitLog(onLog, `[LOGIN-BATCH][${index}/${total}] DONE ${credentials.email}`);

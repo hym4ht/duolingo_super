@@ -8,7 +8,7 @@ config.json
 accounts.json
 sign-in-account.json
 vcc.json
+link-family.json
 
 .DS_Store
 Thumbs.db
-

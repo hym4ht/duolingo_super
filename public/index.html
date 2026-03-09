@@ -676,6 +676,7 @@
               <select id="afterLoginSelect">
                 <option value="none">Tidak ada</option>
                 <option value="trial-auto-vcc">Claim trial + isi pembayaran</option>
+                <option value="family-invite-link">Ambil link invite family</option>
               </select>
             </div>
             <div class="field hidden" id="vccSelectField">
@@ -703,6 +704,13 @@
                 </select>
               </div>
               <div class="field">
+                <label for="browserSelect">Browser</label>
+                <select id="browserSelect">
+                  <option value="chromium">Chromium</option>
+                  <option value="chrome-stable">Chrome Stable</option>
+                </select>
+              </div>
+              <div class="field">
                 <label for="slowMoInput">Slow mo (ms)</label>
                 <input id="slowMoInput" type="number" min="0" />
               </div>
@@ -713,6 +721,10 @@
               <div class="field">
                 <label for="maxWorkersInput">Max workers</label>
                 <input id="maxWorkersInput" type="number" min="1" />
+              </div>
+              <div class="field">
+                <label for="trialFailureHoldInput">Hold failure (detik)</label>
+                <input id="trialFailureHoldInput" type="number" min="0" max="600" />
               </div>
               <div class="field">
                 <label for="proxyServerInput">Proxy server</label>
@@ -921,6 +933,7 @@
       results: [],
       currentSessionId: null,
       eventSource: null,
+      sessionPollTimer: null,
     };
 
     const els = {
@@ -936,11 +949,13 @@
       vccSelectField: document.getElementById('vccSelectField'),
       vccSelect: document.getElementById('vccSelect'),
       headlessToggle: document.getElementById('headlessToggle'),
+      browserSelect: document.getElementById('browserSelect'),
       submitWaitInput: document.getElementById('submitWaitInput'),
       retryInput: document.getElementById('retryInput'),
       slowMoInput: document.getElementById('slowMoInput'),
       timeoutInput: document.getElementById('timeoutInput'),
       maxWorkersInput: document.getElementById('maxWorkersInput'),
+      trialFailureHoldInput: document.getElementById('trialFailureHoldInput'),
       proxyServerInput: document.getElementById('proxyServerInput'),
       proxyUsernameInput: document.getElementById('proxyUsernameInput'),
       proxyPasswordInput: document.getElementById('proxyPasswordInput'),
@@ -1018,6 +1033,55 @@
       els.logs.textContent = 'Menunggu proses...';
       els.sessionChip.textContent = 'session: -';
       els.eventStateChip.textContent = 'disconnected';
+    }
+
+    function setRunBusy(isBusy) {
+      els.startRunBtn.disabled = isBusy;
+      els.startRunBtn.textContent = isBusy ? 'Menjalankan...' : 'Jalankan Sekarang';
+    }
+
+    function stopSessionPolling() {
+      if (state.sessionPollTimer) {
+        clearInterval(state.sessionPollTimer);
+        state.sessionPollTimer = null;
+      }
+    }
+
+    function closeEventSource() {
+      if (state.eventSource) {
+        state.eventSource.close();
+        state.eventSource = null;
+      }
+    }
+
+    async function finalizeRun(status, result = null) {
+      state.results = result?.results || [];
+      renderResults();
+
+      if (status === 'done') {
+        setRunStatus(`Selesai: ${result?.successCount || 0} sukses / ${result?.failedCount || 0} gagal.`, 'done');
+      } else {
+        setRunStatus(result?.error || 'Session gagal.', 'error');
+      }
+
+      appendLog(`[WEB] session selesai | status=${status}`);
+      els.eventStateChip.textContent = status;
+      closeEventSource();
+      stopSessionPolling();
+      setRunBusy(false);
+      state.currentSessionId = null;
+      await loadData();
+    }
+
+    async function syncSessionStatus() {
+      if (!state.currentSessionId) return null;
+      const sessionId = state.currentSessionId;
+      const sessionData = await fetchJSON(`/api/login-session/${sessionId}`);
+      if (sessionId !== state.currentSessionId) return sessionData;
+      if (sessionData.status !== 'running') {
+        await finalizeRun(sessionData.status, sessionData.result || null);
+      }
+      return sessionData;
     }
 
     function getBadgeClass(status) {
@@ -1141,12 +1205,21 @@
         runBtn.dataset.action = 'run-account';
         runBtn.dataset.email = account.email;
 
+        const inviteBtn = createCell('button', 'Invite Link', 'mini-btn');
+        inviteBtn.type = 'button';
+        inviteBtn.dataset.action = 'collect-family-link';
+        inviteBtn.dataset.email = account.email;
+
         const clearBtn = createCell('button', 'Clear Session', 'mini-btn');
         clearBtn.type = 'button';
         clearBtn.dataset.action = 'clear-account-session';
         clearBtn.dataset.email = account.email;
 
-        actions.append(editBtn, runBtn, clearBtn);
+        actions.append(editBtn, runBtn);
+        if (account.trial_badge === 'claimed') {
+          actions.append(inviteBtn);
+        }
+        actions.append(clearBtn);
         actionCell.appendChild(actions);
 
         row.append(checkboxCell, loginCell, trialCell, sessionCell, emailCell, usernameCell, lastLoginCell, actionCell);
@@ -1215,12 +1288,15 @@
         const statusCell = document.createElement('td');
         const badge = createCell('span', row.success ? 'Sukses' : 'Gagal', `badge ${row.success ? 'success' : 'failed'}`);
         statusCell.appendChild(badge);
+        const successInfo = row.family_invite_link
+          ? `invite=${row.family_invite_link}`
+          : `${row.current_url || 'Logged in'}${row.trial_status ? ` | trial=${row.trial_status}` : row.after_login_status ? ` | trial=${row.after_login_status}` : ''}`;
         tr.append(
           createCell('td', String(index + 1)),
           statusCell,
           createCell('td', row.email || '-', 'muted'),
           createCell('td', row.username || '-', 'muted'),
-          createCell('td', row.success ? `${row.current_url || 'Logged in'}${row.trial_status ? ` | trial=${row.trial_status}` : row.after_login_status ? ` | trial=${row.after_login_status}` : ''}` : (row.error || '-'), 'muted'),
+          createCell('td', row.success ? successInfo : (row.error || '-'), 'muted'),
         );
         els.resultsTableBody.appendChild(tr);
       });
@@ -1283,11 +1359,13 @@
       state.vccEntries = vccData.entries || [];
 
       els.headlessToggle.value = String(configData.headless ?? false);
+      els.browserSelect.value = configData.browser || 'chromium';
       els.slowMoInput.value = configData.slow_mo ?? 70;
       els.timeoutInput.value = configData.timeout ?? 30000;
       els.maxWorkersInput.value = configData.max_workers ?? 1;
       els.submitWaitInput.value = configData.submit_wait_seconds ?? 4;
       els.retryInput.value = configData.login_retry_attempts ?? 5;
+      els.trialFailureHoldInput.value = configData.trial_failure_hold_seconds ?? 20;
 
       renderStats();
       populateRunnerSelects();
@@ -1307,15 +1385,17 @@
         manual_password: mode === 'single' && els.passwordModeSelect.value === 'manual',
         after_login_action: afterLoginAction,
         vcc_id: afterLoginAction === 'trial-auto-vcc' ? els.vccSelect.value : undefined,
+        browser: els.browserSelect.value,
         headless: els.headlessToggle.value === 'true',
         slow_mo: Number(els.slowMoInput.value || state.config?.slow_mo || 70),
         timeout: Number(els.timeoutInput.value || state.config?.timeout || 30000),
         max_workers: Number(els.maxWorkersInput.value || state.config?.max_workers || 1),
         submit_wait_seconds: els.submitWaitInput.value === '' ? '' : Number(els.submitWaitInput.value),
         login_retry_attempts: Number(els.retryInput.value || state.config?.login_retry_attempts || 5),
+        trial_failure_hold_seconds: Number(els.trialFailureHoldInput.value || state.config?.trial_failure_hold_seconds || 20),
         proxy_server: els.proxyServerInput.value.trim(),
         proxy_username: els.proxyUsernameInput.value.trim(),
-        proxy_password: els.proxyPasswordInput.value.trim(),
+        proxy_password: els.proxyPasswordInput.value,
       };
 
       if (mode === 'single' && !payload.email) {
@@ -1331,19 +1411,13 @@
       return payload;
     }
 
-    function closeEventSource() {
-      if (state.eventSource) {
-        state.eventSource.close();
-        state.eventSource = null;
-      }
-    }
-
     async function startRun(payload) {
+      stopSessionPolling();
       closeEventSource();
       state.results = [];
       renderResults();
       clearLogs();
-      els.startRunBtn.disabled = true;
+      setRunBusy(true);
       setRunStatus('Menjalankan session login dari browser...', 'running');
 
       const startData = await fetchJSON('/api/login-session', {
@@ -1358,6 +1432,13 @@
 
       const eventSource = new EventSource(`/api/login-session/${startData.session_id}/events`);
       state.eventSource = eventSource;
+      state.sessionPollTimer = setInterval(() => {
+        syncSessionStatus().catch(() => {
+          if (state.currentSessionId) {
+            els.eventStateChip.textContent = 'reconnecting';
+          }
+        });
+      }, 3000);
 
       eventSource.onmessage = async (event) => {
         try {
@@ -1368,28 +1449,20 @@
           }
 
           if (data.type === 'result') {
-            state.results = data.result?.results || [];
-            renderResults();
-
-            if (data.status === 'done') {
-              setRunStatus(`Selesai: ${data.result?.successCount || 0} sukses / ${data.result?.failedCount || 0} gagal.`, 'done');
-            } else {
-              setRunStatus(data.result?.error || 'Session gagal.', 'error');
-            }
-
-            appendLog(`[WEB] session selesai | status=${data.status}`);
-            els.eventStateChip.textContent = data.status;
-            closeEventSource();
-            els.startRunBtn.disabled = false;
-            await loadData();
+            await finalizeRun(data.status, data.result || null);
           }
         } catch (error) {
           appendLog(`[WEB] event invalid: ${event.data}`);
         }
       };
 
-      eventSource.onerror = () => {
+      eventSource.onerror = async () => {
         els.eventStateChip.textContent = 'reconnecting';
+        try {
+          await syncSessionStatus();
+        } catch {
+          // Keep waiting; polling fallback will keep checking.
+        }
       };
     }
 
@@ -1400,7 +1473,9 @@
         await startRun(payload);
       } catch (error) {
         setRunStatus(error.message, 'error');
-        els.startRunBtn.disabled = false;
+        stopSessionPolling();
+        closeEventSource();
+        setRunBusy(false);
       }
     });
 
@@ -1425,7 +1500,7 @@
           body: JSON.stringify({
             previous_email: els.accountPreviousEmail.value.trim(),
             email: els.accountEmailInput.value.trim(),
-            password: els.accountPasswordInput.value.trim(),
+            password: els.accountPasswordInput.value,
             username: els.accountUsernameInput.value.trim(),
           }),
         });
@@ -1490,7 +1565,7 @@
       }
     });
 
-    els.accountsTableBody.addEventListener('click', (event) => {
+    els.accountsTableBody.addEventListener('click', async (event) => {
       const button = event.target.closest('button[data-action]');
       if (!button) return;
       const email = button.dataset.email;
@@ -1516,15 +1591,41 @@
         return;
       }
 
-      if (button.dataset.action === 'clear-account-session') {
-        window.confirm(`Hapus sesi login untuk ${account.email}?`) && fetchJSON('/api/sessions/clear', {
-          method: 'POST',
-          body: JSON.stringify({ scope: 'selected', emails: [account.email] }),
-        }).then(loadData).then(() => {
-          setRunStatus(`Sesi ${account.email} berhasil dihapus.`, 'done');
-        }).catch((error) => {
+      if (button.dataset.action === 'collect-family-link') {
+        if (account.trial_badge !== 'claimed') {
+          setRunStatus(`Akun ${account.email} belum claimed trial.`, 'error');
+          return;
+        }
+
+        try {
+          els.runMode.value = 'single';
+          els.singleAccountSelect.value = account.email;
+          els.passwordModeSelect.value = 'auto';
+          els.afterLoginSelect.value = 'family-invite-link';
+          updateRunnerVisibility();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          await startRun(buildRunPayload());
+        } catch (error) {
           setRunStatus(error.message, 'error');
-        });
+          stopSessionPolling();
+          closeEventSource();
+          setRunBusy(false);
+        }
+        return;
+      }
+
+      if (button.dataset.action === 'clear-account-session') {
+        if (!window.confirm(`Hapus sesi login untuk ${account.email}?`)) return;
+        try {
+          await fetchJSON('/api/sessions/clear', {
+            method: 'POST',
+            body: JSON.stringify({ scope: 'selected', emails: [account.email] }),
+          });
+          await loadData();
+          setRunStatus(`Sesi ${account.email} berhasil dihapus.`, 'done');
+        } catch (error) {
+          setRunStatus(error.message, 'error');
+        }
       }
     });
 

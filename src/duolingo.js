@@ -299,13 +299,20 @@ function resolveBrowserSelection(browserName = 'chromium') {
 
     if (['chrome', 'chrome-stable', 'google-chrome', 'google-chrome-stable'].includes(normalized)) {
         const executablePath = findExecutablePath(CHROME_STABLE_CANDIDATES);
-        if (!executablePath) {
-            throw new Error('Google Chrome Stable tidak ditemukan. Set BROWSER_EXECUTABLE_PATH atau CHROME_BIN.');
+        if (executablePath) {
+            return {
+                key: 'chrome-stable',
+                label: 'google-chrome-stable',
+                executablePath,
+                fallbackMessage: '',
+            };
         }
+
         return {
-            key: 'chrome-stable',
-            label: 'google-chrome-stable',
-            executablePath,
+            key: 'chromium',
+            label: 'chromium',
+            executablePath: null,
+            fallbackMessage: 'Google Chrome Stable tidak ditemukan; fallback ke Chromium Playwright. Set BROWSER_EXECUTABLE_PATH atau CHROME_BIN jika ingin tetap memakai Google Chrome Stable.',
         };
     }
 
@@ -313,6 +320,7 @@ function resolveBrowserSelection(browserName = 'chromium') {
         key: 'chromium',
         label: 'chromium',
         executablePath: null,
+        fallbackMessage: '',
     };
 }
 
@@ -2575,6 +2583,9 @@ export async function registerDuolingo(email, config) {
         const ensure = (ok, detail) => {
             if (!ok) throw new Error(detail);
         };
+        if (browserSelection.fallbackMessage) {
+            logStep(`[BROWSER] ${browserSelection.fallbackMessage}`);
+        }
         logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir}`);
 
         if (proxy) {
@@ -2979,6 +2990,9 @@ export async function loginDuolingo(account, config) {
         const ensure = (ok, detail) => {
             if (!ok) throw new Error(detail);
         };
+        if (browserSelection.fallbackMessage) {
+            logStep(`[BROWSER] ${browserSelection.fallbackMessage}`);
+        }
         logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir} | headless=${effectiveLoginHeadless}`);
         if (config?.force_headed_login === true && config?.headless === true) {
             logStep('[BROWSER] login dipaksa headed walau config headless aktif');

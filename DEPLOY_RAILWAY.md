@@ -21,6 +21,8 @@ Image Docker sudah menjalankan app lewat `xvfb-run`, jadi `HEADLESS=false` atau 
 Catatan:
 
 - Browser tetap tidak muncul ke layar lokal kamu. `xvfb` hanya menyediakan display virtual di dalam container.
+- Image default repo ini memasang Playwright Chromium, bukan Google Chrome Stable. Kalau runtime memilih `chrome-stable` tanpa binary Chrome yang terpasang, app sekarang fallback ke Chromium dan menulis warning di log.
+- Kalau memang ingin pakai Google Chrome Stable, set `BROWSER_EXECUTABLE_PATH` atau `CHROME_BIN` ke path binary Chrome yang valid di container.
 - Kalau tidak butuh mode interactive, `HEADLESS=true` tetap lebih ringan.
 - Setelah ubah `Dockerfile`, Railway harus rebuild image saat redeploy.
 

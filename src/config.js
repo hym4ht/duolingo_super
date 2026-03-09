@@ -6,6 +6,7 @@ const CONFIG_FILE_PATH = resolveConfigPath();
 const DEFAULT_CONFIG = {
     browser: 'chromium',
     persistent_profile: true,
+    fresh_login: false,
     profile_dir: resolveDefaultProfileDir(),
     max_workers: 1,
     headless: true,
@@ -64,6 +65,7 @@ function readRailwayDefaults() {
     return {
         browser: 'chrome-stable',
         persistent_profile: false,
+        fresh_login: false,
         profile_dir: resolveDefaultProfileDir('chrome-stable'),
         headless: true,
         force_headed_login: false,
@@ -87,6 +89,7 @@ function readEnvConfig() {
     return {
         ...(readStringEnv('BROWSER') !== undefined ? { browser: readStringEnv('BROWSER') } : {}),
         ...(readBooleanEnv('PERSISTENT_PROFILE') !== undefined ? { persistent_profile: readBooleanEnv('PERSISTENT_PROFILE') } : {}),
+        ...(readBooleanEnv('FRESH_LOGIN') !== undefined ? { fresh_login: readBooleanEnv('FRESH_LOGIN') } : {}),
         ...(readStringEnv('PROFILE_DIR') !== undefined ? { profile_dir: resolveDefaultProfileDir() } : {}),
         ...(readBooleanEnv('HEADLESS') !== undefined ? { headless: readBooleanEnv('HEADLESS') } : {}),
         ...(readBooleanEnv('FORCE_HEADED_LOGIN') !== undefined ? { force_headed_login: readBooleanEnv('FORCE_HEADED_LOGIN') } : {}),
@@ -126,6 +129,7 @@ export function buildPublicConfig(config = {}) {
     return {
         browser: config.browser,
         persistent_profile: config.persistent_profile,
+        fresh_login: config.fresh_login,
         profile_dir: config.profile_dir,
         headless: config.headless,
         force_headed_login: config.force_headed_login,

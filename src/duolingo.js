@@ -13,7 +13,7 @@
 //   8. Isi email + password → submit
 
 import { chromium } from 'playwright';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import {
     resolveBaseProfileDir,
@@ -2859,6 +2859,7 @@ export async function loginDuolingo(account, config) {
     const debugSteps = config?.debug_steps !== false;
     const showPointer = config?.show_pointer !== false;
     const effectiveLoginHeadless = config?.force_headed_login === true ? false : config?.headless === true;
+    const freshLogin = config?.fresh_login === true;
     const manualPasswordRequested = config?.manual_password === true;
     const manualPassword = manualPasswordRequested && effectiveLoginHeadless !== true;
     const profileDir = resolveLoginSessionDir({ email, username }, config);
@@ -2937,10 +2938,6 @@ export async function loginDuolingo(account, config) {
             log: (message) => logStep(message),
         });
 
-        mkdirSync(profileDir, { recursive: true });
-        context = await chromium.launchPersistentContext(profileDir, launchOptions);
-        await installContextScripts(context, { showPointer });
-
         const attachAttemptPage = async (nextPage) => {
             page = nextPage;
             await page.bringToFront().catch(() => { });
@@ -2989,36 +2986,57 @@ export async function loginDuolingo(account, config) {
             await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
         };
 
-        if (!await reuseBootstrapPage()) {
-            await attachAttemptPage(await context.newPage());
-        }
         const ensure = (ok, detail) => {
             if (!ok) throw new Error(detail);
         };
-        if (browserSelection.fallbackMessage) {
-            logStep(`[BROWSER] ${browserSelection.fallbackMessage}`);
-        }
-        logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir} | headless=${effectiveLoginHeadless}`);
-        if (config?.force_headed_login === true && config?.headless === true) {
-            logStep('[BROWSER] login dipaksa headed walau config headless aktif');
-        }
+        const launchLoginContext = async ({ clearProfile } = {}) => {
+            if (context) {
+                await context.close().catch(() => { });
+                context = null;
+                page = null;
+            }
 
-        if (proxy) {
-            await runStep('Validasi proxy', async () => {
-                await verifyBrowserProxy({
-                    page,
-                    proxy,
-                    log: (message) => logStep(message),
-                    timeout: Math.max(10000, Math.min(config.timeout, 15000)),
+            if (clearProfile) {
+                rmSync(profileDir, { recursive: true, force: true });
+                logStep(`[SESSION] fresh login | profile dibersihkan ${profileDir}`);
+            }
+
+            mkdirSync(profileDir, { recursive: true });
+            context = await chromium.launchPersistentContext(profileDir, launchOptions);
+            await installContextScripts(context, { showPointer });
+
+            if (!await reuseBootstrapPage()) {
+                await attachAttemptPage(await context.newPage());
+            }
+
+            if (browserSelection.fallbackMessage) {
+                logStep(`[BROWSER] ${browserSelection.fallbackMessage}`);
+            }
+            logStep(`[BROWSER] ${browserSelection.label} persistent | profile=${profileDir} | headless=${effectiveLoginHeadless}`);
+            if (config?.force_headed_login === true && config?.headless === true) {
+                logStep('[BROWSER] login dipaksa headed walau config headless aktif');
+            }
+
+            if (proxy) {
+                await runStep('Validasi proxy', async () => {
+                    await verifyBrowserProxy({
+                        page,
+                        proxy,
+                        log: (message) => logStep(message),
+                        timeout: Math.max(10000, Math.min(config.timeout, 15000)),
+                    });
+                    await sleep(150);
                 });
-                await sleep(150);
-            });
-        } else {
-            logStep('[PROXY] off');
-        }
+            } else {
+                logStep('[PROXY] off');
+            }
+        };
 
         if (manualPasswordRequested && !manualPassword) {
             logStep('[PASSWORD] manual mode diabaikan karena headless aktif');
+        }
+        if (freshLogin) {
+            logStep('[SESSION] fresh login aktif | profile dibersihkan sebelum tiap attempt');
         }
 
         let lastFailure = null;
@@ -3026,7 +3044,11 @@ export async function loginDuolingo(account, config) {
         for (attemptIndex = 1; attemptIndex <= maxLoginAttempts; attemptIndex += 1) {
             stepIndex = 1;
 
-            if (attemptIndex > 1) {
+            if (freshLogin) {
+                await launchLoginContext({ clearProfile: true });
+            } else if (attemptIndex === 1) {
+                await launchLoginContext({ clearProfile: false });
+            } else {
                 logStep(`[RETRY] buka tab baru untuk percobaan ${attemptIndex}/${maxLoginAttemptsLabel}`);
                 await openRetryAttemptPage();
             }

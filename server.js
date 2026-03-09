@@ -190,6 +190,7 @@ async function buildOverridesFromBody(body = {}) {
         ...(body.browser ? { browser: String(body.browser).trim().toLowerCase() } : {}),
         ...(body.profile_dir ? { profile_dir: String(body.profile_dir).trim() } : {}),
         ...(body.persistent_profile !== undefined ? { persistent_profile: toBoolean(body.persistent_profile, true) } : {}),
+        ...(body.fresh_login !== undefined ? { fresh_login: toBoolean(body.fresh_login, config.fresh_login === true) } : {}),
         ...(body.headless !== undefined ? { headless: toBoolean(body.headless, config.headless === true) } : {}),
         ...(body.force_headed_login !== undefined ? { force_headed_login: toBoolean(body.force_headed_login, config.force_headed_login === true) } : {}),
         ...(body.show_pointer !== undefined ? { show_pointer: toBoolean(body.show_pointer, config.show_pointer !== false) } : {}),

@@ -1,6 +1,7 @@
 {
   "browser": "chromium",
   "persistent_profile": true,
+  "fresh_login": false,
   "profile_dir": ".profiles/duolingo-chromium",
   "max_workers": 1,
   "headless": true,

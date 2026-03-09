@@ -7,6 +7,7 @@ export function normalizeRuntimeConfig(baseConfig = {}, overrides = {}) {
     const browser = String(overrides.browser ?? baseConfig.browser ?? 'chromium').trim().toLowerCase();
     const baseBrowser = String(baseConfig.browser ?? 'chromium').trim().toLowerCase();
     const persistentProfile = overrides.persistent_profile ?? baseConfig.persistent_profile ?? true;
+    const freshLogin = overrides.fresh_login ?? baseConfig.fresh_login ?? false;
     const browserDefaultProfileDir = resolveDefaultProfileDir(browser);
     const rawProfileDir = String(overrides.profile_dir ?? baseConfig.profile_dir ?? browserDefaultProfileDir).trim();
     const inheritedDefaultProfileDirs = new Set([
@@ -40,12 +41,14 @@ export function normalizeRuntimeConfig(baseConfig = {}, overrides = {}) {
         ...baseConfig,
         browser,
         persistent_profile: persistentProfile !== false,
+        fresh_login: freshLogin === true,
         profile_dir: profileDir,
         headless: Boolean(headless),
         slow_mo: Number.isFinite(slowMo) ? slowMo : baseConfig.slow_mo,
         timeout: Number.isFinite(timeout) ? timeout : baseConfig.timeout,
-        // Chromium persistent profile tidak aman dipakai paralel karena profilnya terkunci.
-        max_workers: persistentProfile !== false
+        // Persistent profile dan fresh login sama-sama tidak aman dipakai paralel
+        // karena profile directory dipakai ulang / dibersihkan saat runtime.
+        max_workers: (persistentProfile !== false || freshLogin === true)
             ? 1
             : (Number.isFinite(maxWorkers) ? Math.max(1, maxWorkers) : baseConfig.max_workers),
         password,

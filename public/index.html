@@ -712,6 +712,14 @@
                 <div class="helper">Railway image terbaru meng-install Google Chrome Stable. Kalau service belum rebuild, runtime bisa fallback ke Chromium.</div>
               </div>
               <div class="field">
+                <label for="freshLoginToggle">Fresh login</label>
+                <select id="freshLoginToggle">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+                <div class="helper">Hapus profile/session akun sebelum tiap attempt login.</div>
+              </div>
+              <div class="field">
                 <label for="slowMoInput">Slow mo (ms)</label>
                 <input id="slowMoInput" type="number" min="0" />
               </div>
@@ -951,6 +959,7 @@
       vccSelect: document.getElementById('vccSelect'),
       headlessToggle: document.getElementById('headlessToggle'),
       browserSelect: document.getElementById('browserSelect'),
+      freshLoginToggle: document.getElementById('freshLoginToggle'),
       submitWaitInput: document.getElementById('submitWaitInput'),
       retryInput: document.getElementById('retryInput'),
       slowMoInput: document.getElementById('slowMoInput'),
@@ -1361,6 +1370,7 @@
 
       els.headlessToggle.value = String(configData.headless ?? false);
       els.browserSelect.value = configData.browser || 'chromium';
+      els.freshLoginToggle.value = String(configData.fresh_login ?? false);
       els.slowMoInput.value = configData.slow_mo ?? 70;
       els.timeoutInput.value = configData.timeout ?? 30000;
       els.maxWorkersInput.value = configData.max_workers ?? 1;
@@ -1387,6 +1397,7 @@
         after_login_action: afterLoginAction,
         vcc_id: afterLoginAction === 'trial-auto-vcc' ? els.vccSelect.value : undefined,
         browser: els.browserSelect.value,
+        fresh_login: els.freshLoginToggle.value === 'true',
         headless: els.headlessToggle.value === 'true',
         slow_mo: Number(els.slowMoInput.value || state.config?.slow_mo || 70),
         timeout: Number(els.timeoutInput.value || state.config?.timeout || 30000),

@@ -74,6 +74,9 @@ export async function loginAccountsBatch({ count, baseConfig, overrides = {}, on
     if (runtimeConfig.persistent_profile) {
         emitLog(onLog, `[LOGIN-BATCH] persistent profile aktif | base_profile=${runtimeConfig.profile_dir}`);
     }
+    if (runtimeConfig.fresh_login === true) {
+        emitLog(onLog, '[LOGIN-BATCH] fresh login aktif | profile akun dibersihkan sebelum tiap attempt');
+    }
     emitLog(onLog, `[LOGIN-BATCH] START total=${safeCount} workers=${runtimeConfig.max_workers}`);
 
     const limit = pLimit(runtimeConfig.max_workers);

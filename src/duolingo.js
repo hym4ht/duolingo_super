@@ -117,6 +117,7 @@ const DEFAULT_TIMEZONE = String(process.env.TZ || 'Asia/Jakarta').trim() || 'Asi
 const DEFAULT_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 const DEFAULT_BROWSER_ARGS = [
     '--disable-blink-features=AutomationControlled',
+    '--disable-dev-shm-usage',
     '--lang=id-ID',
 ];
 const CHROME_STABLE_CANDIDATES = [
@@ -326,6 +327,10 @@ function resolveBrowserSelection(browserName = 'chromium') {
 
 function buildLaunchOptions({ browser, headless, slowMo, proxy, userAgent } = {}) {
     const browserSelection = resolveBrowserSelection(browser);
+    const launchArgs = [...DEFAULT_BROWSER_ARGS];
+    if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
+        launchArgs.push('--no-sandbox', '--disable-setuid-sandbox');
+    }
     const launchOptions = {
         headless,
         slowMo,
@@ -333,7 +338,7 @@ function buildLaunchOptions({ browser, headless, slowMo, proxy, userAgent } = {}
         locale: 'id-ID',
         timezoneId: DEFAULT_TIMEZONE,
         userAgent: String(userAgent || DEFAULT_DESKTOP_USER_AGENT),
-        args: [...DEFAULT_BROWSER_ARGS],
+        args: launchArgs,
     };
 
     if (browserSelection.executablePath) {

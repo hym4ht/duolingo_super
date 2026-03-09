@@ -62,8 +62,9 @@ function readNumberEnv(name) {
 function readRailwayDefaults() {
     if (!isRailwayRuntime()) return {};
     return {
+        browser: 'chrome-stable',
         persistent_profile: false,
-        profile_dir: resolveDefaultProfileDir(),
+        profile_dir: resolveDefaultProfileDir('chrome-stable'),
         headless: true,
         force_headed_login: false,
         show_pointer: false,

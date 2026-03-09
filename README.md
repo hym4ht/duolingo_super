@@ -6,7 +6,11 @@ Automasi login dan operasi akun Duolingo berbasis Node.js, Express, dan Playwrig
 
 1. Install dependency dengan `npm install`
 2. Siapkan `config.json` dari template `config.example.json`
-3. Jalankan web UI dengan `npm run start:web`
+3. Jalankan web UI dengan `npm start`
+
+## Menjalankan mode CLI
+
+Gunakan `npm run start:cli`
 
 ## File yang sengaja tidak masuk Git
 

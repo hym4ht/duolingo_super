@@ -22,6 +22,7 @@ import {
 import { normalizeTrialPaymentData } from './payment.js';
 import { normalizeProxyConfig, verifyBrowserProxy } from './proxy.js';
 import { resolveDebugDir } from './runtime-paths.js';
+import { ensureVirtualDisplay } from './virtual-display.js';
 
 const SELECTORS = {
     englishCard: '[data-test="flag-english language-card"]',
@@ -1693,6 +1694,11 @@ export async function registerDuolingo(email, config) {
             launchOptions.proxy = proxy;
         }
 
+        await ensureVirtualDisplay({
+            headless: launchOptions.headless,
+            log: (message) => logStep(message),
+        });
+
         mkdirSync(profileDir, { recursive: true });
         context = await chromium.launchPersistentContext(profileDir, launchOptions);
 
@@ -2059,6 +2065,11 @@ export async function loginDuolingo(account, config) {
         if (proxy) {
             launchOptions.proxy = proxy;
         }
+
+        await ensureVirtualDisplay({
+            headless: launchOptions.headless,
+            log: (message) => logStep(message),
+        });
 
         mkdirSync(profileDir, { recursive: true });
         context = await chromium.launchPersistentContext(profileDir, launchOptions);

@@ -17,4 +17,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x800x24", "node", "server.js"]
+CMD ["bash", "/app/start-web.sh"]

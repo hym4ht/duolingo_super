@@ -16,6 +16,14 @@ BASIC_AUTH_PASSWORD=ganti-password-kuat
 DEFAULT_ACCOUNT_PASSWORD=opsional-jika-semua-akun-pakai-password-sama
 ```
 
+Image Docker sudah menjalankan app lewat `xvfb-run`, jadi `HEADLESS=false` atau `FORCE_HEADED_LOGIN=true` tetap bisa dipakai di Railway tanpa error `Missing X server or $DISPLAY`.
+
+Catatan:
+
+- Browser tetap tidak muncul ke layar lokal kamu. `xvfb` hanya menyediakan display virtual di dalam container.
+- Kalau tidak butuh mode interactive, `HEADLESS=true` tetap lebih ringan.
+- Setelah ubah `Dockerfile`, Railway harus rebuild image saat redeploy.
+
 Kalau ingin data akun, VCC, dan browser profile tetap tersimpan setelah restart atau redeploy:
 
 1. Tambahkan Railway Volume, mount misalnya ke `/data`
